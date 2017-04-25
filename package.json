@@ -1,0 +1,23 @@
+{
+  "name": "FarAwayJs",
+  "description": "Node and browser (or cross browsers) very simple communication with a kind of RPC for JS/TS objects using WebSockets",
+  "version": "0.0.1",
+  "license": "MIT",
+  "author": {
+    "name": "François Chabrou",
+    "email": "developer@stopgapjs.org",
+    "url": "http://www.stopgapjs.org"
+  },
+  "main": "./js/far_away.js",
+  "homepage": "http://www.stopgapjs.org/#FarAwayJs",
+  "dependencies": {
+    "@types/node": ">=6.0.69",
+    "@types/ws" : ">=0.0.40",
+    "@types/jssha" : ">=0.0.29",
+    "ws" : ">=2.2.3",
+    "requirejs": ">=2.1.14",
+    "chance" : ">=1.0.4",
+    "jssha" : ">=2.2.0"
+  },
+  "readme": "#FarAwayJs"
+}
