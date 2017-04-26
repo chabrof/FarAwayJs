@@ -1,20 +1,51 @@
 import { _console } from "./_debug"
-import * as jsSHA from "jssha"
+import { FACommunication } from "./interfaces"
+import { generateError } from "./error"
+import * as Chance from "chance"
 
 let _callables = {}
 let _rCallIdx = 0
 let _promiseOkCbksH = {}
-let _wsServer = "ws://localhost:8080"
-let _ws, _wsReadyPromise
-let _declareWsReady :() => void
+
+let _com :FACommunication, _comReadyPromise :Promise<void>
 let _importedInstiables = {}
 
+export let setCommunication = function(communication :FACommunication) :Promise<any> {
+  _com = communication
+  _com.onMessage(_messageCbk)
+  _comReadyPromise = _com.initListening()
+  return _comReadyPromise
+}
+
+let _messageCbk = function(event) {
+  let messageObj
+  try {
+    messageObj = JSON.parse(event.data)
+  }
+  catch (e) {
+    _console.log('Exception', e);
+    generateError(_com, 3, "Message is not in the good format")
+  }
+
+  try {
+    _treat[messageObj.type](messageObj)
+  }
+  catch (e) {
+    if (e.send) {
+      generateError(_com, 1, e.message)
+    }
+    else {
+      console.error('Error : ', e.message, e.stack)
+    }
+  }
+}
+
 let _treat :any = {}
-_treat.rError = function(errorObj) {
+_treat.farError = function(errorObj) {
   _console.error("Error on simpleRpc", errorObj.error);
 }
 
-_treat.rCallReturn = function(callObj :any) {
+_treat.farCallReturn = function(callObj :any) {
   _console.log('treat_rCallReturn', callObj, _promiseOkCbksH)
   if (typeof callObj.rIdx !== "number") {
   throw {
@@ -27,7 +58,7 @@ _treat.rCallReturn = function(callObj :any) {
   _promiseOkCbksH[callObj.rIdx](ret) // complete the associated Promise
 }
 
-_treat.rInstantiateReturn = function(callObj) {
+_treat.farInstantiateReturn = function(callObj) {
   _console.log('treat_rInstantiateReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
@@ -35,15 +66,23 @@ _treat.rInstantiateReturn = function(callObj) {
       "send" : false
     }
   }
+
   let instanceRpc = new FarAwayCallerInstance(callObj.rIdx)
   _promiseOkCbksH[callObj.rIdx](instanceRpc) // complete the associated Promise
 }
 
-_treat.rImportReturn = function(callObj) {
+_treat.farImportReturn = function(callObj) {
   _console.log('treat.rImportReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
+      "send" : false
+    }
+  }
+  _secureHash = callObj.secureHash
+  if (! _secureHash) {
+    throw {
+      "message" : "_secureHash is empty or invalid in response",
       "send" : false
     }
   }
@@ -102,45 +141,6 @@ class FarAwayCallerInstance {
   }
 }
 
-export function initWsListening(url :string = "localhost", port :string = "8080") {
-  _console.assert(_ws === undefined, "You have already init the WebSocket listening")
-
-  _ws = new WebSocket(_wsServer)
-  _wsReadyPromise = new Promise(function(ok, ko) { _declareWsReady = ok; })
-  _ws.addEventListener('open', function() { _declareWsReady() })
-
-  _ws.addEventListener('message', function(message) {
-    let messageObj
-    try { messageObj = JSON.parse(message.data) }
-    catch (e) {
-      _console.log('Exception', e);
-      _generateError(3, "Message is not in the good format")
-    }
-
-    try { _treat[messageObj.type](messageObj) }
-    catch (e) {
-      if (e.send) {
-        _generateError(1, e.message)
-      }
-      else {
-        console.error('Error : ', e.message)
-      }
-    }
-  })
-}
-
-function _generateError (code :number, message :string) {
-  console.error('Generate error :', message)
-  _ws.send(JSON.stringify(
-    {
-      "type" :  "rError",
-      "error" : {
-        "code"     : code,
-        "message"  : message
-      }
-    }  ))
-}
-
 function _getRCallIdx() {
   return _rCallIdx++
 }
@@ -155,7 +155,8 @@ function _extractArgs(argsIn :any) {
 
 export function farCall(objectName :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
   _console.log('farCall : ', objectName, args)
-  _console.assert(_wsReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation')
+  _console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation')
+  _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
   if (typeof objectName !== "string" || ! objectName.length) {
     throw {
@@ -164,29 +165,38 @@ export function farCall(objectName :string, args :any[] = [], instanceIdx :numbe
       }
   }
   let idx = _getRCallIdx()
-  let promise = new Promise((ok, ko) => { _promiseOkCbksH[idx] = ok } )
-  _wsReadyPromise.then(
+  let promise = new Promise((ok, ko) => { _promiseOkCbksH[idx] = ok })
+  _comReadyPromise.then(
     () => {
-      _ws.send(JSON.stringify({
-          "type"        : "rCall",
+      _com.send(JSON.stringify({
+          "type"        : "farCall",
           "objectName"  : objectName,
           "args"        : args,
           "instanceIdx" : instanceIdx,
-          "rIdx"        : idx
+          "rIdx"        : idx,
+          "secureHash"  : _secureHash
         }))
     })
   return promise
 }
 
+// unique guid for caller instance
+let _guid :string
+let _secureHash :string
+
 export function farImport(objNames :string[]) :any {
   _console.log('farImport : ', objNames)
+
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
-  _wsReadyPromise.then(
+  let chance = new Chance()
+  _guid = chance.guid()
+  _comReadyPromise.then(
     function() {
-      _ws.send(JSON.stringify({
-          "type" : "rImport",
+      _com.send(JSON.stringify({
+          "type" : "farImport",
           "rIdx" : idx,
+          "guid" : _guid,
           "symbols" : objNames
       }))
     })
@@ -195,25 +205,20 @@ export function farImport(objNames :string[]) :any {
 
 export function farInstantiate (constructorName :string, args :any[] = []) :Promise<any> {
   _console.log('farInstantiate : ', constructorName)
+  _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
+
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
-  _wsReadyPromise.then(
+  _comReadyPromise.then(
     function() {
-      _ws.send(JSON.stringify({
-          "type"             : "rInstantiate",
+      _com.send(JSON.stringify({
+          "type"             : "farInstantiate",
           "constructorName"  : constructorName,
           "rIdx"             : idx,
-          "guid"             : _generateGuid(),
-          "args"             : args
+          "GUID"             : _guid,
+          "args"             : args,
+          "secureHash"       : _secureHash
       }))
     })
   return promise
-}
-
-
-function _generateGuid() :string {
-  let shaObj = new jsSHA("SHA-256", "TEXT");
-  shaObj.update("This is a ");
-  shaObj.update("test");
-  return shaObj.getHash("HEX");
 }

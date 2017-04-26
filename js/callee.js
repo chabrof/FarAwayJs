@@ -4,46 +4,54 @@
         if (v !== undefined) module.exports = v;
     }
     else if (typeof define === "function" && define.amd) {
-        define(["require", "exports", "./_debug"], factory);
+        define(["require", "exports", "./_debug", "./error", "jssha", "chance"], factory);
     }
 })(function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var _debug_1 = require("./_debug");
+    var error_1 = require("./error");
+    var jsSHA = require("jssha");
+    var Chance = require("chance");
     var _callables = {};
     var _rCallIdx = 0;
-    var _wsServer = "ws://localhost:8080";
-    var _ws, _wsReadyPromise;
-    var _declareWsReady;
+    var _com, _comReadyPromise;
     var _instancesH = {};
-    function usePassThroughWsServer(url, port) {
-        if (url === void 0) { url = "localhost"; }
-        if (port === void 0) { port = "8080"; }
-        _ws = new WebSocket(_wsServer);
-        _wsReadyPromise = new Promise(function (ok, ko) { _declareWsReady = ok; });
-        _ws.addEventListener('open', function () { _declareWsReady(); });
-        _ws.addEventListener('message', function (message) {
-            var messageObj;
-            try {
-                messageObj = JSON.parse(message.data);
+    var _magicToken = new Chance().guid();
+    var _secureHashes = {};
+    exports.setCommunication = function (communication) {
+        _com = communication;
+        _com.onMessage(_messageCbk);
+        _comReadyPromise = _com.initListening();
+        return _comReadyPromise;
+    };
+    var _messageCbk = function (event) {
+        var messageObj;
+        try {
+            messageObj = JSON.parse(event.data);
+        }
+        catch (e) {
+            error_1.generateError(_com, 3, "Message is not in the good format");
+        }
+        try {
+            _treat[messageObj.type](messageObj);
+        }
+        catch (e) {
+            if (e.send) {
+                error_1.generateError(_com, 1, e.message);
             }
-            catch (e) {
-                _generateError(3, "Message is not in the good format");
+            else {
+                _debug_1._console.error('Error : ', e.message, e.stack);
             }
-            try {
-                _treat[messageObj.type](messageObj);
-            }
-            catch (e) {
-                if (e.send) {
-                    _generateError(1, e.message);
-                }
-                else {
-                    _debug_1._console.error('Error : ', e.message);
-                }
-            }
-        });
+        }
+    };
+    function _generateSecureHash(clientGUID) {
+        var shaObj = new jsSHA("SHA-256", "TEXT");
+        shaObj.update(_magicToken + clientGUID);
+        var secureHash = shaObj.getHash("HEX");
+        _secureHashes[secureHash] = true;
+        return secureHash;
     }
-    exports.usePassThroughWsServer = usePassThroughWsServer;
     function regInstantiable(object, excludeCalls, objectName) {
         if (objectName === void 0) { objectName = undefined; }
         _debug_1._console.assert(typeof object === 'function' && object, 'Entity must be a not null function (' + object + ' given)');
@@ -53,11 +61,11 @@
     var CallableObject = (function () {
         function CallableObject(object, type, excludeCalls) {
             if (excludeCalls === void 0) { excludeCalls = []; }
-            this.stucture = {};
+            this.structure = {};
             this.type = type;
             this.object = object;
             this._excludeCalls = excludeCalls;
-            this.stucture = this._exploreObject(this.object);
+            this.structure = this._exploreObject(this.object);
         }
         CallableObject.prototype._exploreObject = function (object) {
             if (this.type === "function")
@@ -82,25 +90,42 @@
         _callables[funcName ? funcName : funcName.name] = new CallableObject(func, "function");
     }
     exports.regFunction = regFunction;
+    var _checkSecureHash = function (secureHash, instanceIdx) {
+        if (_secureHashes[secureHash] === undefined) {
+            error_1.generateError(_com, 4, 'The client seems not to be registered, it must call farImport before further operation and then pass secureHash on each request');
+            return false;
+        }
+        if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== secureHash) {
+            error_1.generateError(_com, 4, 'The client is not allowed to access this ressource');
+            return false;
+        }
+        return true;
+    };
     var _treat = {};
-    _treat.rInstantiate = function (constructorObj) {
-        _debug_1._console.log('treat.rInstantiate', constructorObj);
+    _treat.farInstantiate = function (constructorObj) {
+        _debug_1._console.log('treat.farInstantiate', constructorObj);
+        _debug_1._console.assert(_com, 'communication must be set before calling this function');
+        if (!_checkSecureHash(constructorObj.secureHash))
+            return; // -->
         var Constructor = _extractConstructorReferenceWName(constructorObj.constructorName);
         try {
             constructorObj.args.unshift(null);
             var instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args));
-            _instancesH[constructorObj.rIdx] = instance;
+            _instancesH[constructorObj.rIdx] = { "instance": instance, "secureHash": constructorObj.secureHash };
         }
         catch (e) {
             throw constructorObj.constructorName + "seems not to be a valid constructor";
         }
-        _ws.send(JSON.stringify({
-            "type": "rInstantiateReturn",
+        _com.send(JSON.stringify({
+            "type": "farInstantiateReturn",
             "rIdx": constructorObj.rIdx
         }));
     };
-    _treat.rCall = function (callObj) {
-        _debug_1._console.log('treat.rCall', callObj);
+    _treat.farCall = function (callObj) {
+        _debug_1._console.log('treat.farCall', callObj);
+        _debug_1._console.assert(_com, 'communication must be set before calling this function');
+        if (!_checkSecureHash(callObj.secureHash, callObj.instanceIdx))
+            return; // -->
         if (typeof callObj.objectName !== "string" || !callObj.objectName.length) {
             throw {
                 "message": "objectName is empty or invalid : " + callObj.objectName,
@@ -111,14 +136,15 @@
         var ret = obj();
         if (ret instanceof Promise) {
             ret
-                .then(function (ret) { _sendRCallReturn(callObj, ret); })
-                .catch(function (error) { _generateError(10, error); });
+                .then(function (ret) { _sendFarCallReturn(callObj, ret); })
+                .catch(function (error) { error_1.generateError(_com, 10, error); });
         }
         else {
-            _sendRCallReturn(callObj, ret);
+            _sendFarCallReturn(callObj, ret);
         }
     };
-    _treat.rImport = function (callObj) {
+    _treat.farImport = function (callObj) {
+        _debug_1._console.assert(_com, 'communication must be set before calling this function');
         if (typeof callObj.symbols !== "object" || !callObj.symbols.length) {
             throw {
                 "message": "List of symbols is empty or invalid : " + callObj.symbols,
@@ -126,7 +152,7 @@
             };
         }
         var result = [];
-        callObj.forEach(function (symbol) {
+        callObj.symbols.forEach(function (symbol) {
             if (!_callables[symbol]) {
                 throw {
                     "message": "Symbol '" + symbol + "' does not exist in callee",
@@ -135,16 +161,17 @@
             }
             result.push(_callables[symbol]);
         });
-        _ws.send(JSON.stringify({
-            "type": "rImportReturn",
+        _com.send(JSON.stringify({
+            "type": "farImportReturn",
             "rIdx": callObj.rIdx,
+            "secureHash": _generateSecureHash(callObj.GUID),
             "objects": result
         }));
     };
-    function _sendRCallReturn(callObj, ret) {
-        _debug_1._console.log('_sendRCallReturn', ret);
-        _ws.send(JSON.stringify({
-            "type": "rCallReturn",
+    function _sendFarCallReturn(callObj, ret) {
+        _debug_1._console.log('_sendFarCallReturn', ret);
+        _com.send(JSON.stringify({
+            "type": "farCallReturn",
             "rIdx": callObj.rIdx,
             "return": ret
         }));
@@ -174,8 +201,8 @@
         var context;
         var objNameTab = objectName.split('.');
         if (instanceId !== undefined && instanceId !== null) {
-            obj = _instancesH[instanceId][objNameTab[0]];
-            context = _instancesH[instanceId];
+            context = _instancesH[instanceId].instance;
+            obj = context[objNameTab[0]];
         }
         else {
             obj = _callables[objNameTab[0]].object;
@@ -192,21 +219,11 @@
         }
         if (!obj || typeof obj !== 'function') {
             throw {
-                "message": "Object " + objectName + " does not exist in callee ('" + objectName + "' called)",
+                "message": "Object " + objectName + ' does not exist ' + (instanceId ? "(in instance) " : "") + "in callee ('" + objectName + "' called)",
                 "send": true
             };
         }
         return function () { console.log('context', context); return obj.apply(context, args); };
-    }
-    function _generateError(code, message) {
-        _debug_1._console.error('Generate error :', message);
-        _ws.send(JSON.stringify({
-            "type": "rError",
-            "error": {
-                "code": code,
-                "message": message
-            }
-        }));
     }
 });
 //# sourceMappingURL=callee.js.map

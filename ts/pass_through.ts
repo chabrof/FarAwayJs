@@ -17,6 +17,7 @@ function sendToOthers(message, ws) {
 wss.on('connection', function connection(ws) {
   wsTab.push(ws)
   _console.log('connection client', ws.readyState)
+
   ws.on('message', function incoming(message) {
     //_console.log('received: %s', message)
     sendToOthers(message, ws)

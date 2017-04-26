@@ -1,10 +1,13 @@
 import { debugOn } from "./_debug"
-import { initWsListening, farCall, farInstantiate, farImport } from "./caller"
-import { usePassThroughWsServer, regInstantiable, regFunction } from "./callee"
+import { setCommunication as setCommunicationClr, farCall, farInstantiate, farImport } from "./caller"
+import { setCommunication as setCommunicationClee, regInstantiable, regFunction } from "./callee"
+import { FACommunication } from "./interfaces"
+import { WS } from "./communication/caller/ws"
+import { WSPassThrough } from "./communication/callee/ws_pass_through"
 
 export let farAwayCaller = {
   debugOn :debugOn,
-  initWsListening : initWsListening,
+  setCommunication : setCommunicationClr,
   farCall :farCall,
   farInstantiate :farInstantiate,
   farImport :farImport
@@ -12,7 +15,17 @@ export let farAwayCaller = {
 
 export let farAwayCallee = {
   debugOn :debugOn,
-  usePassThroughWsServer : usePassThroughWsServer,
+  setCommunication : setCommunicationClee,
   regInstantiable : regInstantiable,
   regFunction : regFunction
+}
+
+export let communications = {
+  caller : {
+    WS : WS
+  },
+  callee : {
+    WSPassThrough : WSPassThrough
+    //WSServer
+  }
 }
