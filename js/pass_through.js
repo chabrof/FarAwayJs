@@ -13,7 +13,10 @@
     var _debug_1 = require("./_debug");
     var wss = new ws_1.Server({ port: 8080 });
     var wsTab = [];
-    function sendToOthers(message, ws) {
+    var calleeServerSHash; // the callee server (where we call remote object)
+    var secureHashToSocketClient = {};
+    var GUIDToSocketClient = {};
+    function sendToDest(message, ws) {
         for (var ct = 0; ct < wsTab.length; ct++) {
             if (wsTab[ct] !== ws) {
                 if (wsTab[ct].readyState === ws_1.OPEN) {
@@ -22,12 +25,17 @@
             }
         }
     }
+    function _identifySrc(messageObj) {
+        secureHashToSocketClient[messageObj.srcSecureHash] = socketCLient;
+    }
     wss.on('connection', function connection(ws) {
         wsTab.push(ws);
         _debug_1._console.log('connection client', ws.readyState);
         ws.on('message', function incoming(message) {
+            var messageObj = JSON.parse(message);
+            _identifySrc(messageObj);
             //_console.log('received: %s', message)
-            sendToOthers(message, ws);
+            sendToDest(message, ws);
         });
     });
 });

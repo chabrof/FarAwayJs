@@ -10,6 +10,7 @@ let _com :FACommunication, _comReadyPromise :Promise<void>
 let _instancesH = {}
 let _magicToken = new Chance().guid()
 let _secureHashes = {}
+let _mySecureHash = _generateSecureHash(new Chance().guid())
 
 export let setCommunication = function(communication :FACommunication) :Promise<any> {
   _com = communication
@@ -18,17 +19,17 @@ export let setCommunication = function(communication :FACommunication) :Promise<
   return _comReadyPromise
 }
 
-let _messageCbk = function(event) {
+let _messageCbk = function(data :string) {
   let messageObj :any
   try {
-    messageObj = JSON.parse(event.data)
+    messageObj = JSON.parse(data)
   }
   catch (e) {
     generateError(_com, 3, "Message is not in the good format")
   }
-
+  let secureHash
   try {
-    _treat[messageObj.type](messageObj)
+    secureHash = _treat[messageObj.type](messageObj)
   }
   catch (e) {
     if (e.send) {
@@ -38,6 +39,7 @@ let _messageCbk = function(event) {
       _console.error('Error : ', e.message, e.stack)
     }
   }
+  return secureHash
 }
 
 function _generateSecureHash(clientGUID :string) :string {
@@ -124,10 +126,11 @@ _treat.farInstantiate = function(constructorObj) {
     throw constructorObj.constructorName + "seems not to be a valid constructor"
   }
 
-  _com.send(JSON.stringify({
+  _com.send(constructorObj.secureHash, JSON.stringify({
       "type" 		: "farInstantiateReturn",
       "rIdx" 		: constructorObj.rIdx
     } ))
+  return constructorObj.secureHash
 }
 
 _treat.farCall = function(callObj) {
@@ -147,11 +150,11 @@ _treat.farCall = function(callObj) {
 
   if (ret instanceof Promise) {
     ret
-      .then(function(ret) { _sendFarCallReturn(callObj, ret) })
+      .then(function(ret) { _sendFarCallReturn(callObj.secureHash, callObj, ret) })
       .catch(function(error) { generateError(_com, 10, error) })
   }
   else {
-    _sendFarCallReturn(callObj, ret)
+    _sendFarCallReturn(callObj.secureHash, callObj, ret)
   }
 }
 
@@ -173,17 +176,20 @@ _treat.farImport = function(callObj) {
       }
       result.push(_callables[symbol])
     })
-  _com.send(JSON.stringify({
-      "type" 		: "farImportReturn",
-      "rIdx"    : callObj.rIdx,
-      "secureHash" : _generateSecureHash(callObj.GUID),
-      "objects" : result
-    }))
+  let destSecureHash = _generateSecureHash(callObj.GUID)
+  setTimeout(() => {
+      _com.send(_mySecureHash, destSecureHash, JSON.stringify({
+          "type" 		: "farImportReturn",
+          "rIdx"    : callObj.rIdx,
+          "secureHash" : destSecureHash,
+          "objects" : result
+        }, callObj.GUID))
+      }, 0)
 }
 
-function _sendFarCallReturn(callObj, ret) {
+function _sendFarCallReturn(secureHash :string, callObj, ret) {
   _console.log('_sendFarCallReturn', ret)
-  _com.send(JSON.stringify({
+  _com.send(_mySecureHash, secureHash, JSON.stringify({
     "type" 		: "farCallReturn",
     "rIdx" 		: callObj.rIdx,
     "return" 	: ret
