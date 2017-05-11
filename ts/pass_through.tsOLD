@@ -1,0 +1,44 @@
+import { Server, OPEN } from "ws"
+import { _console } from "./_debug"
+import { FAMessageObj } from "./interfaces"
+
+let wss = new Server({ port: 8080 })
+let wsTab = []
+let calleeServerSHash :string // the callee server (where we call remote object)
+
+let secureHashToSocketClient = {}
+let GUIDToSocketClient = {}
+
+function sendToDest(message, ws) {
+  for (let ct = 0; ct < wsTab.length; ct++) {
+    if (wsTab[ct] !== ws) {
+      if (wsTab[ct].readyState === OPEN) {
+        wsTab[ct].send(message)
+      }
+    }
+  }
+}
+
+function _identifySrc(messageObj :FAMessageObj, socketClient :WebSocket) {
+  if (messageObj.srcSecureHash && ! secureHashToSocketClient[messageObj.srcSecureHash]) {
+    secureHashToSocketClient[messageObj.srcSecureHash] = socketClient
+  }
+  else {
+    _console.assert(messageObj.dstGUID, 'If no secure Hash given the GUID must be provided')
+    GUIDToSocketClient[messageObj.dstGUID] = socketClient
+  }
+}
+
+wss.on('connection', function(ws) {
+  wsTab.push(ws)
+  let socketClient :WebSocket = ws as WebSocket
+  _console.log('connection client', ws.readyState)
+
+  ws.on('message', (message) => {
+    let messageObj :FAMessageObj = JSON.parse(message)
+    _identifySrc(messageObj, socketClient)
+
+    //_console.log('received: %s', message)
+    sendToDest(message, ws)
+  })
+})

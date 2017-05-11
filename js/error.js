@@ -10,10 +10,10 @@
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var _debug_1 = require("./_debug");
-    function generateError(communication, code, message) {
+    function generateError(srcSecureHash, communication, code, message, destSecureHash) {
         console.error('Generate error :', message);
         _debug_1._console.assert(communication !== undefined && communication !== null, "communication must be a valid FACommunication instance");
-        communication.send(JSON.stringify({
+        communication.send(srcSecureHash, destSecureHash, JSON.stringify({
             "type": "farError",
             "error": {
                 "code": code,

@@ -1,10 +1,9 @@
 /**
  * @class NullConsole
- * @impletments Console
+ * @extends Console
  * This class implements all Browser Console methods
  */
-export declare class NullConsole implements Console {
-    constructor(stdW: any, stdE: any);
+export declare class NullConsole {
     log(): void;
     debug(): void;
     info(): void;
@@ -28,4 +27,4 @@ export declare class NullConsole implements Console {
     select(): any;
     table(): any;
 }
-export declare let nullConsole: any;
+export declare let nullConsole: NullConsole;

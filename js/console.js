@@ -11,11 +11,11 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     /**
      * @class NullConsole
-     * @impletments Console
+     * @extends Console
      * This class implements all Browser Console methods
      */
     var NullConsole = (function () {
-        function NullConsole(stdW, stdE) {
+        function NullConsole() {
         }
         NullConsole.prototype.log = function () {
             return null;

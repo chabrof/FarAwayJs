@@ -1,12 +1,9 @@
 /**
  * @class NullConsole
- * @impletments Console
+ * @extends Console
  * This class implements all Browser Console methods
  */
-export class NullConsole implements Console {
-
-  constructor (stdW :any, stdE :any) {
-  }
+export class NullConsole {
 
   log() :void {
     return null;

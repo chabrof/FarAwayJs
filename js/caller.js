@@ -4,12 +4,13 @@
         if (v !== undefined) module.exports = v;
     }
     else if (typeof define === "function" && define.amd) {
-        define(["require", "exports", "./_debug", "./error", "chance"], factory);
+        define(["require", "exports", "./_debug", "./_debug", "./error", "chance"], factory);
     }
 })(function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var _debug_1 = require("./_debug");
+    var _debug_2 = require("./_debug");
     var error_1 = require("./error");
     var Chance = require("chance");
     var _callables = {};
@@ -17,27 +18,30 @@
     var _promiseOkCbksH = {};
     var _com, _comReadyPromise;
     var _importedInstiables = {};
-    exports.setCommunication = function (communication) {
+    // unique guid for caller instance
+    var _guid;
+    var _secureHash;
+    function setCommunication(communication) {
         _com = communication;
         _com.onMessage(_messageCbk);
         _comReadyPromise = _com.initListening();
         return _comReadyPromise;
-    };
-    var _messageCbk = function (event) {
+    }
+    var _messageCbk = function (data) {
         var messageObj;
         try {
-            messageObj = JSON.parse(event.data);
+            messageObj = JSON.parse(data.message);
         }
         catch (e) {
-            _debug_1._console.log('Exception', e);
-            error_1.generateError(_com, 3, "Message is not in the good format");
+            _debug_1._console.error("JSON.parse error: " + data.message, e);
+            error_1.generateError(_secureHash, _com, 3, "Message is not in the good format");
         }
         try {
             _treat[messageObj.type](messageObj);
         }
         catch (e) {
             if (e.send) {
-                error_1.generateError(_com, 1, e.message);
+                error_1.generateError(_secureHash, _com, 1, e.message);
             }
             else {
                 console.error('Error : ', e.message, e.stack);
@@ -159,7 +163,7 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(JSON.stringify({
+            _com.send(_secureHash, JSON.stringify({
                 "type": "farCall",
                 "objectName": objectName,
                 "args": args,
@@ -170,10 +174,6 @@
         });
         return promise;
     }
-    exports.farCall = farCall;
-    // unique guid for caller instance
-    var _guid;
-    var _secureHash;
     function farImport(objNames) {
         _debug_1._console.log('farImport : ', objNames);
         var idx = _getRCallIdx();
@@ -181,16 +181,15 @@
         var chance = new Chance();
         _guid = chance.guid();
         _comReadyPromise.then(function () {
-            _com.send(JSON.stringify({
+            _com.send(_guid, JSON.stringify({
                 "type": "farImport",
                 "rIdx": idx,
-                "guid": _guid,
+                "GUID": _guid,
                 "symbols": objNames
             }));
         });
         return promise;
     }
-    exports.farImport = farImport;
     function farInstantiate(constructorName, args) {
         if (args === void 0) { args = []; }
         _debug_1._console.log('farInstantiate : ', constructorName);
@@ -198,17 +197,22 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(JSON.stringify({
+            _com.send(_secureHash, JSON.stringify({
                 "type": "farInstantiate",
                 "constructorName": constructorName,
                 "rIdx": idx,
-                "GUID": _guid,
                 "args": args,
                 "secureHash": _secureHash
             }));
         });
         return promise;
     }
-    exports.farInstantiate = farInstantiate;
+    exports.farAwayCaller = {
+        debugOn: _debug_2.debugOn,
+        setCommunication: setCommunication,
+        farCall: farCall,
+        farInstantiate: farInstantiate,
+        farImport: farImport
+    };
 });
 //# sourceMappingURL=caller.js.map

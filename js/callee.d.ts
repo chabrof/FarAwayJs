@@ -1,4 +1,7 @@
-import { FACommunication } from "./interfaces";
-export declare let setCommunication: (communication: FACommunication) => Promise<any>;
-export declare function regInstantiable(object: any, excludeCalls: string[], objectName?: string): void;
-export declare function regFunction(func: any, funcName: any): void;
+import { FACalleeCommunication } from "./interfaces";
+export declare let farAwayCallee: {
+    debugOn: (prConsole?: Console) => void;
+    setCommunication: (communication: FACalleeCommunication) => Promise<any>;
+    regInstantiable: (object: any, excludeCalls: string[], objectName?: string) => void;
+    regFunction: (func: any, funcName: any) => void;
+};

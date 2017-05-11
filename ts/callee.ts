@@ -1,20 +1,21 @@
 import { _console } from "./_debug"
-import { FACommunication, TupleInstanceSecureHash } from "./interfaces"
+import { debugOn } from "./_debug"
+import { FACalleeCommunication, TupleInstanceSecureHash } from "./interfaces"
 import { generateError } from "./error"
-import * as jsSHA from "jssha"
 import * as Chance from "chance"
+import { generateSecureHash } from "./secure_hash"
 
 let _callables = {}
 let _rCallIdx = 0
-let _com :FACommunication, _comReadyPromise :Promise<void>
+let _com :FACalleeCommunication, _comReadyPromise :Promise<void>
 let _instancesH = {}
 let _magicToken = new Chance().guid()
 let _secureHashes = {}
-let _mySecureHash = _generateSecureHash(new Chance().guid())
+let _mySecureHash = generateSecureHash(_magicToken, new Chance().guid())
 
-export let setCommunication = function(communication :FACommunication) :Promise<any> {
+let setCommunication = function(communication :FACalleeCommunication) :Promise<any> {
   _com = communication
-  _com.onMessage(_messageCbk)
+  _com.onMessage(_mySecureHash, _messageCbk)
   _comReadyPromise = _com.initListening()
   return _comReadyPromise
 }
@@ -25,32 +26,25 @@ let _messageCbk = function(data :string) {
     messageObj = JSON.parse(data)
   }
   catch (e) {
-    generateError(_com, 3, "Message is not in the good format")
+    _console.error("JSON parse error, message is not in the good format :" + data)
+    return
   }
   let secureHash
   try {
     secureHash = _treat[messageObj.type](messageObj)
   }
   catch (e) {
-    if (e.send) {
-      generateError(_com, 1, e.message)
+    if (e.send && e.secureHash) {
+      generateError(_mySecureHash, _com, 1, e.message, e.secureHash)
     }
     else {
-      _console.error('Error : ', e.message, e.stack)
+      _console.error(`Error on treat of type(${messageObj.type}) : `, e.message, e.stack)
     }
   }
   return secureHash
 }
 
-function _generateSecureHash(clientGUID :string) :string {
-  let shaObj = new jsSHA("SHA-256", "TEXT")
-  shaObj.update(_magicToken + clientGUID)
-  let secureHash = shaObj.getHash("HEX")
-  _secureHashes[secureHash] = true
-  return secureHash
-}
-
-export function regInstantiable(object :any, excludeCalls :string[], objectName :string = undefined) {
+function regInstantiable(object :any, excludeCalls :string[], objectName :string = undefined) {
   _console.assert(typeof object === 'function' && object, 'Entity must be a not null function (' + object + ' given)')
 
   _callables[objectName ? objectName : object.name] = new CallableObject(object, "instantiable", excludeCalls)
@@ -89,7 +83,7 @@ class CallableObject {
   }
 }
 
-export function regFunction (func :any, funcName) {
+function regFunction (func :any, funcName) {
   console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)')
 
   _callables[funcName ? funcName : funcName.name] = new CallableObject(func, "function")
@@ -97,12 +91,12 @@ export function regFunction (func :any, funcName) {
 
 let _checkSecureHash = function(secureHash :string, instanceIdx? :number) : boolean {
   if (_secureHashes[secureHash] === undefined) {
-    generateError(_com, 4, 'The client seems not to be registered, it must call farImport before further operation and then pass secureHash on each request')
+    generateError(_mySecureHash, _com, 4, 'The client seems not to be registered, it must call farImport before further operation and then pass secureHash on each request', secureHash)
     return false
   }
 
   if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== secureHash) {
-    generateError(_com, 4, 'The client is not allowed to access this ressource')
+    generateError(_mySecureHash, _com, 4, 'The client is not allowed to access this ressource', secureHash)
     return false
   }
   return true
@@ -116,7 +110,7 @@ _treat.farInstantiate = function(constructorObj) {
 
   if (! _checkSecureHash(constructorObj.secureHash)) return // -->
 
-  let Constructor = _extractConstructorReferenceWName(constructorObj.constructorName)
+  let Constructor = _extractConstructorReferenceWName(constructorObj)
   try {
     constructorObj.args.unshift(null);
     let instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args))
@@ -126,10 +120,12 @@ _treat.farInstantiate = function(constructorObj) {
     throw constructorObj.constructorName + "seems not to be a valid constructor"
   }
 
-  _com.send(constructorObj.secureHash, JSON.stringify({
-      "type" 		: "farInstantiateReturn",
-      "rIdx" 		: constructorObj.rIdx
-    } ))
+  _com.send(_mySecureHash,
+            constructorObj.secureHash,
+            JSON.stringify({
+                "type" 		: "farInstantiateReturn",
+                "rIdx" 		: constructorObj.rIdx
+              } ))
   return constructorObj.secureHash
 }
 
@@ -142,16 +138,17 @@ _treat.farCall = function(callObj) {
   if (typeof callObj.objectName !== "string" || ! callObj.objectName.length) {
     throw {
         "message" : "objectName is empty or invalid : " + callObj.objectName,
-        "send"    : true
+        "send"    : true,
+        "secureHash" : callObj.srcSecureHash
       }
   }
-  let obj = _extractObjectReferenceWName(callObj.objectName, callObj.args, callObj.instanceIdx)
+  let obj = _extractObjectReferenceWName(callObj)
   let ret = obj()
 
   if (ret instanceof Promise) {
     ret
       .then(function(ret) { _sendFarCallReturn(callObj.secureHash, callObj, ret) })
-      .catch(function(error) { generateError(_com, 10, error) })
+      .catch(function(error) { generateError(_mySecureHash, _com, 10, error, callObj.srcSecureHash) })
   }
   else {
     _sendFarCallReturn(callObj.secureHash, callObj, ret)
@@ -163,7 +160,16 @@ _treat.farImport = function(callObj) {
   if (typeof callObj.symbols !== "object" || ! callObj.symbols.length) {
     throw {
         "message" : "List of symbols is empty or invalid : " + callObj.symbols,
-        "send"    : true
+        "send"    : true,
+        "secureHash" : callObj.srcSecureHash
+      }
+  }
+
+  if (! callObj.GUID) {
+    throw {
+        "message" : "GUID must be provided",
+        "send"    : true,
+        "secureHash" : null
       }
   }
   let result :any[] = []
@@ -171,60 +177,74 @@ _treat.farImport = function(callObj) {
       if (! _callables[symbol]) {
         throw {
             "message" : `Symbol '${symbol}' does not exist in callee`,
-            "send"    : true
+            "send"    : true,
+            "secureHash" : callObj.GUID
           }
       }
       result.push(_callables[symbol])
     })
-  let destSecureHash = _generateSecureHash(callObj.GUID)
+  // srcSecureHash is just a GUID, we generate secureHash with it
+  let destSecureHash = generateSecureHash(_magicToken, callObj.GUID)
+  // register client
+  _secureHashes[destSecureHash] = true
+
+  _com.registerSecureHash(callObj.GUID, destSecureHash)
+  // At this point, caller must provide its secureHash
   setTimeout(() => {
-      _com.send(_mySecureHash, destSecureHash, JSON.stringify({
-          "type" 		: "farImportReturn",
-          "rIdx"    : callObj.rIdx,
-          "secureHash" : destSecureHash,
-          "objects" : result
-        }, callObj.GUID))
-      }, 0)
+      _com.send(_mySecureHash,
+                destSecureHash,
+                JSON.stringify({
+                    "type" 		     : "farImportReturn",
+                    "rIdx"        : callObj.rIdx,
+                    "secureHash"  : destSecureHash,
+                    "objects"     : result }))
+    }, 0)
 }
 
 function _sendFarCallReturn(secureHash :string, callObj, ret) {
   _console.log('_sendFarCallReturn', ret)
-  _com.send(_mySecureHash, secureHash, JSON.stringify({
-    "type" 		: "farCallReturn",
-    "rIdx" 		: callObj.rIdx,
-    "return" 	: ret
-  } ))
+  _com.send(_mySecureHash,
+            secureHash,
+            JSON.stringify({
+                "type" 		: "farCallReturn",
+                "rIdx" 		: callObj.rIdx,
+                "return" 	: ret
+              } ))
 }
 
-function _extractConstructorReferenceWName(objectName) {
-  let obj = _callables[objectName].object
+function _extractConstructorReferenceWName(callObj) {
+  _console.log('_extractConstructorReferenceWName', callObj)
+  let obj = _callables[callObj.constructorName].object
 
-  let objNameTab = objectName.split('.')
+  let objNameTab = callObj.constructorName.split('.')
 
   for (let ct = 1; ct < objNameTab.length; ct++) {
     obj = obj[objNameTab[ct]]
     if (! obj) {
       throw {
-        "message" : "Object " + objectName + " does not exist in callee ('" + objectName + "' called)",
-        "send" : true
+        "message"     : "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
+        "send"        : true,
+        "secureHash"  : callObj.srcSecureHash
       }
     }
   }
   if (! obj) {
     throw {
-      "message" : "Object " + objectName + " does not exist in callee ('" + objectName + "' called)",
-      "send" : true
+      "message"     : "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
+      "send"        : true,
+      "secureHash"  : callObj.srcSecureHash
     }
   }
   return obj;
 }
 
-function _extractObjectReferenceWName(objectName :string, args, instanceId :number) {
+function _extractObjectReferenceWName(callObj) {
+  _console.log('_extractConstructorReferenceWName', callObj)
   let obj
   let context
-  let objNameTab = objectName.split('.')
-  if (instanceId !== undefined && instanceId !== null) {
-    context = _instancesH[instanceId].instance
+  let objNameTab = callObj.objectName.split('.')
+  if (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) {
+    context = _instancesH[callObj.instanceIdx].instance
     obj = context[objNameTab[0]]
   }
   else {
@@ -233,8 +253,9 @@ function _extractObjectReferenceWName(objectName :string, args, instanceId :numb
       obj = obj[objNameTab[ct]].object
       if (! obj) {
         throw {
-          "message" : "Object " + objectName + " does not exist in callee ('" + objectName + "' called)",
-          "send" : true
+          "message"     : "Object " + callObj.objectName + " does not exist in callee ('" + callObj.objectName + "' called)",
+          "send"        : true,
+          "secureHash"  : callObj.srcSecureHash
         }
       }
     }
@@ -242,9 +263,17 @@ function _extractObjectReferenceWName(objectName :string, args, instanceId :numb
   }
   if (! obj || typeof obj !== 'function') {
     throw {
-      "message" : "Object " + objectName + ' does not exist ' + (instanceId ? "(in instance) " : "") + "in callee ('" + objectName + "' called)",
-      "send" : true
+      "message" : "Object " + callObj.objectName + ' does not exist ' + (callObj.instanceId ? "(in instance) " : "") + "in callee ('" + callObj.objectName + "' called)",
+      "send" : true,
+      "secureHash" : callObj.srcSecureHash
     }
   }
-  return function () { console.log('context', context); return obj.apply(context, args) }
+  return function () { console.log('context', context); return obj.apply(context, callObj.args) }
+}
+
+export let farAwayCallee = {
+  debugOn :debugOn,
+  setCommunication : setCommunication,
+  regInstantiable : regInstantiable,
+  regFunction : regFunction
 }

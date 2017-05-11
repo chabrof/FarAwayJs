@@ -1,5 +1,6 @@
 import { _console } from "./_debug"
-import { FACommunication } from "./interfaces"
+import { FACallerCommunication } from "./interfaces"
+import { debugOn } from "./_debug"
 import { generateError } from "./error"
 import * as Chance from "chance"
 
@@ -7,24 +8,29 @@ let _callables = {}
 let _rCallIdx = 0
 let _promiseOkCbksH = {}
 
-let _com :FACommunication, _comReadyPromise :Promise<void>
+let _com :FACallerCommunication, _comReadyPromise :Promise<void>
 let _importedInstiables = {}
 
-export let setCommunication = function(communication :FACommunication) :Promise<any> {
+// unique guid for caller instance
+let _guid :string
+let _secureHash :string
+
+
+function setCommunication(communication :FACallerCommunication) :Promise<any> {
   _com = communication
   _com.onMessage(_messageCbk)
   _comReadyPromise = _com.initListening()
   return _comReadyPromise
 }
 
-let _messageCbk = function(event) {
+let _messageCbk = function(data) {
   let messageObj
   try {
-    messageObj = JSON.parse(event.data)
+    messageObj = JSON.parse(data.message)
   }
   catch (e) {
-    _console.log('Exception', e);
-    generateError(_com, 3, "Message is not in the good format")
+    _console.error(`JSON.parse error: ${data.message}`, e);
+    generateError(_secureHash, _com, 3, "Message is not in the good format")
   }
 
   try {
@@ -32,7 +38,7 @@ let _messageCbk = function(event) {
   }
   catch (e) {
     if (e.send) {
-      generateError(_com, 1, e.message)
+      generateError(_secureHash, _com, 1, e.message)
     }
     else {
       console.error('Error : ', e.message, e.stack)
@@ -153,7 +159,7 @@ function _extractArgs(argsIn :any) {
   return argsOut;
 }
 
-export function farCall(objectName :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
+function farCall(objectName :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
   _console.log('farCall : ', objectName, args)
   _console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation')
   _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
@@ -166,25 +172,22 @@ export function farCall(objectName :string, args :any[] = [], instanceIdx :numbe
   }
   let idx = _getRCallIdx()
   let promise = new Promise((ok, ko) => { _promiseOkCbksH[idx] = ok })
-  _comReadyPromise.then(
-    () => {
-      _com.send(JSON.stringify({
-          "type"        : "farCall",
-          "objectName"  : objectName,
-          "args"        : args,
-          "instanceIdx" : instanceIdx,
-          "rIdx"        : idx,
-          "secureHash"  : _secureHash
-        }))
+  _comReadyPromise.then(() => {
+      _com.send(_secureHash,
+                JSON.stringify({
+                    "type"        : "farCall",
+                    "objectName"  : objectName,
+                    "args"        : args,
+                    "instanceIdx" : instanceIdx,
+                    "rIdx"        : idx,
+                    "secureHash"  : _secureHash
+                  }))
     })
   return promise
 }
 
-// unique guid for caller instance
-let _guid :string
-let _secureHash :string
 
-export function farImport(objNames :string[]) :any {
+function farImport(objNames :string[]) :any {
   _console.log('farImport : ', objNames)
 
   let idx = _getRCallIdx()
@@ -193,17 +196,18 @@ export function farImport(objNames :string[]) :any {
   _guid = chance.guid()
   _comReadyPromise.then(
     function() {
-      _com.send(JSON.stringify({
-          "type" : "farImport",
-          "rIdx" : idx,
-          "guid" : _guid,
-          "symbols" : objNames
-      }))
+      _com.send(_guid,
+                JSON.stringify({
+                    "type"    : "farImport",
+                    "rIdx"    : idx,
+                    "GUID"    : _guid,
+                    "symbols" : objNames
+                  }))
     })
   return promise
 }
 
-export function farInstantiate (constructorName :string, args :any[] = []) :Promise<any> {
+function farInstantiate (constructorName :string, args :any[] = []) :Promise<any> {
   _console.log('farInstantiate : ', constructorName)
   _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
@@ -211,14 +215,22 @@ export function farInstantiate (constructorName :string, args :any[] = []) :Prom
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
   _comReadyPromise.then(
     function() {
-      _com.send(JSON.stringify({
-          "type"             : "farInstantiate",
-          "constructorName"  : constructorName,
-          "rIdx"             : idx,
-          "GUID"             : _guid,
-          "args"             : args,
-          "secureHash"       : _secureHash
-      }))
+      _com.send(_secureHash,
+                JSON.stringify({
+                    "type"             : "farInstantiate",
+                    "constructorName"  : constructorName,
+                    "rIdx"             : idx,
+                    "args"             : args,
+                    "secureHash"       : _secureHash
+                  }))
     })
   return promise
+}
+
+export let farAwayCaller = {
+  debugOn :debugOn,
+  setCommunication : setCommunication,
+  farCall :farCall,
+  farInstantiate :farInstantiate,
+  farImport :farImport
 }
