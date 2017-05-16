@@ -19,13 +19,18 @@
     var _com, _comReadyPromise;
     var _importedInstiables = {};
     // unique guid for caller instance
-    var _guid;
-    var _secureHash;
+    var _myCallerGUID;
+    var _myCallerSecureHash;
+    var _backCreates = {};
     function setCommunication(communication) {
         _com = communication;
         _com.onMessage(_messageCbk);
         _comReadyPromise = _com.initListening();
         return _comReadyPromise;
+    }
+    function regBackCreateObject(name, backCreateObject) {
+        _debug_1._console.assert(name, name.length, "name of BackCreateObject must be a not null string");
+        _backCreates[name] = backCreateObject;
     }
     var _messageCbk = function (data) {
         var messageObj;
@@ -34,14 +39,14 @@
         }
         catch (e) {
             _debug_1._console.error("JSON.parse error: " + data.message, e);
-            error_1.generateError(_secureHash, _com, 3, "Message is not in the good format");
+            error_1.generateError(_myCallerSecureHash, _com, 3, "Message is not in the good format");
         }
         try {
             _treat[messageObj.type](messageObj);
         }
         catch (e) {
             if (e.send) {
-                error_1.generateError(_secureHash, _com, 1, e.message);
+                error_1.generateError(_myCallerSecureHash, _com, 1, e.message);
             }
             else {
                 console.error('Error : ', e.message, e.stack);
@@ -64,6 +69,35 @@
         _debug_1._console.log('ici', typeof _promiseOkCbksH[callObj.rIdx]);
         _promiseOkCbksH[callObj.rIdx](ret); // complete the associated Promise
     };
+    _treat.farBackCreateReturn = function (callObj) {
+        _debug_1._console.log('treat_rInstantiateReturn', callObj);
+        if (typeof callObj.rIdx !== "number") {
+            throw {
+                "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
+                "send": false
+            };
+        }
+        var ret = callObj.return;
+        // Instantiate the "BackCreate" object
+        if (!_backCreates[ret.constructorName]) {
+            var availableBCObjectsStr = "";
+            var zeroIdxFlag = true;
+            for (var i in _backCreates) {
+                availableBCObjectsStr += ((!zeroIdxFlag ? ', ' : '') + i);
+                zeroIdxFlag = false;
+            }
+            throw {
+                "message": "backCreateConstructor (" + ret.constructorName + ") is not registered by the caller (" + _myCallerGUID + "). Avalaible objects : " + availableBCObjectsStr + ".",
+                "send": true
+            };
+        }
+        ret.constructorArgs.unshift(null);
+        console.log('---> back create', ret.constructorName, _backCreates, ret.constructorArgs);
+        var backCreateInst = new (Function.prototype.bind.apply(_backCreates[ret.constructorName], ret.constructorArgs));
+        _debug_1._console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise");
+        backCreateInst.init.apply(backCreateInst, ret.initArgs)
+            .then(function () { return _promiseOkCbksH[callObj.rIdx](backCreateInst); });
+    };
     _treat.farInstantiateReturn = function (callObj) {
         _debug_1._console.log('treat_rInstantiateReturn', callObj);
         if (typeof callObj.rIdx !== "number") {
@@ -83,10 +117,10 @@
                 "send": false
             };
         }
-        _secureHash = callObj.secureHash;
-        if (!_secureHash) {
+        _myCallerSecureHash = callObj.callerSecureHash;
+        if (!_myCallerSecureHash) {
             throw {
-                "message": "_secureHash is empty or invalid in response",
+                "message": "_myCallerSecureHash is empty or invalid in response",
                 "send": false
             };
         }
@@ -153,7 +187,7 @@
         if (instanceIdx === void 0) { instanceIdx = undefined; }
         _debug_1._console.log('farCall : ', objectName, args);
         _debug_1._console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation');
-        _debug_1._console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
+        _debug_1._console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
         if (typeof objectName !== "string" || !objectName.length) {
             throw {
                 "message": "Method is empty or invalid : " + objectName,
@@ -163,13 +197,13 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(_secureHash, JSON.stringify({
+            _com.send(_myCallerSecureHash, JSON.stringify({
                 "type": "farCall",
                 "objectName": objectName,
                 "args": args,
                 "instanceIdx": instanceIdx,
                 "rIdx": idx,
-                "secureHash": _secureHash
+                "callerSecureHash": _myCallerSecureHash
             }));
         });
         return promise;
@@ -179,12 +213,12 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         var chance = new Chance();
-        _guid = chance.guid();
+        _myCallerGUID = chance.guid();
         _comReadyPromise.then(function () {
-            _com.send(_guid, JSON.stringify({
+            _com.send(_myCallerGUID, JSON.stringify({
                 "type": "farImport",
                 "rIdx": idx,
-                "GUID": _guid,
+                "callerGUID": _myCallerGUID,
                 "symbols": objNames
             }));
         });
@@ -193,16 +227,16 @@
     function farInstantiate(constructorName, args) {
         if (args === void 0) { args = []; }
         _debug_1._console.log('farInstantiate : ', constructorName);
-        _debug_1._console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
+        _debug_1._console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(_secureHash, JSON.stringify({
+            _com.send(_myCallerSecureHash, JSON.stringify({
                 "type": "farInstantiate",
                 "constructorName": constructorName,
                 "rIdx": idx,
                 "args": args,
-                "secureHash": _secureHash
+                "callerSecureHash": _myCallerSecureHash
             }));
         });
         return promise;
@@ -212,7 +246,8 @@
         setCommunication: setCommunication,
         farCall: farCall,
         farInstantiate: farInstantiate,
-        farImport: farImport
+        farImport: farImport,
+        regBackCreateObject: regBackCreateObject
     };
 });
 //# sourceMappingURL=caller.js.map

@@ -7,8 +7,8 @@ export interface FACallerCommunication extends FASending {
 }
 export interface FACalleeCommunication extends FASending {
     initListening: () => Promise<void>;
-    onMessage: (secureHahsh: string, handler: (data: string) => void) => void;
-    registerSecureHash: (GUID: string, secureHash: string) => void;
+    onMessage: (calleeSecureHash: string, handler: (data: string) => void) => void;
+    registerCallerSecureHash: (calleeSecureHash: string, callerGUID: string, callerSecureHash: string) => void;
 }
 export interface TupleInstanceSecureHash {
     secureHash: string;
@@ -26,4 +26,7 @@ export interface CallerBCInitData {
 }
 export interface CalleeBackCreate {
     getBCInitDataForCaller(): CallerBCInitData;
+}
+export interface CallerBackCreate {
+    init(): Promise<any>;
 }

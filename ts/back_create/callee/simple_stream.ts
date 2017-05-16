@@ -1,18 +1,19 @@
 import { CalleeBackCreate, CallerBCInitData, FACalleeCommunication } from "../../interfaces"
 import * as Chance from "chance"
 import { generateSecureHash } from "../../secure_hash"
+import { _console } from "../../_debug"
 
-class SimpleStream implements CalleeBackCreate {
+export class SimpleStream implements CalleeBackCreate {
 
-  private _host :string
-  private _port :string
+  private _hostForCaller :string
+  private _portForCaller :string
   private _com :FACalleeCommunication
   private _magicToken = new Chance().guid()
   private _mySecureHash :string = generateSecureHash(this._magicToken, new Chance().guid())
 
-  constructor (host :string = "localhost", port :string = "8080") {
-    this._host = host
-    this._port = port
+  constructor (hostForCaller :string = "localhost", portForCaller :string = "8081") {
+    this._hostForCaller = hostForCaller
+    this._portForCaller = portForCaller
   }
 
   public setCommunication(communication :FACalleeCommunication) :void {
@@ -21,13 +22,17 @@ class SimpleStream implements CalleeBackCreate {
   }
 
   private _messageCbk() {
-    
+    _console.assert("This is a read only stream, there is no possible response by the client")
+  }
+
+  public sendData(data) {
+    socket.send(JSON.stringify({ srcSecureHash, message }))
   }
 
   public getBCInitDataForCaller() :CallerBCInitData {
     return {
       constructorName : "SimpleStream",
-      constructorArgs : [ this._host, this._port ],
+      constructorArgs : [ this._hostForCaller, this._portForCaller ],
       initArgs : []
     }
   }

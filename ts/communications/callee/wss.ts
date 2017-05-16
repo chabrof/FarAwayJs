@@ -3,16 +3,21 @@ import { _console } from "../../_debug"
 import { generateError } from "../../error"
 import { Server, OPEN } from "ws"
 
+
+interface CallersWSInfo {
+  GUIDToSocket :any
+  secureHashToSocket :any
+  secureHashToGUID :any
+}
+
 export class WSS implements FACalleeCommunication {
   private _wss :Server
-  private _clientMessageHandlers :((data :string) => string)[] = []
-  private _mainClientHandler :((data :string) => string)
+  private _calleeMessageHandlers :((data :string) => string)[] = []
+  private _mainCalleeSecureHash :string
   private _host :string
   private _port :string
   private _wsTab :any[] = []
-  private _GUIDToSocket :any = {}
-  private _secureHashToSocket :any = {}
-  private _secureHashToGUID :any = {}
+  private _callersWSInfo :{[secureHash :string]:CallersWSInfo} = {}
 
   constructor(host :string = "localhost", port :string = "8080", options? :any) {
     _console.assert(host && host.length, 'host must be a non null string')
@@ -22,10 +27,15 @@ export class WSS implements FACalleeCommunication {
     this._port = port
   }
 
-  public onMessage(secureHash :string, handler :(data :string) => string, mainClient :boolean = true) {
-    this._clientMessageHandlers[secureHash] = handler
+  public onMessage(calleeSecureHash :string, handler :(data :string) => string, mainClient :boolean = true) {
+    this._calleeMessageHandlers[calleeSecureHash] = handler
+    this._callersWSInfo[calleeSecureHash] = {
+        GUIDToSocket        : {},
+        secureHashToSocket  : {},
+        secureHashToGUID    : {}
+      }
     if (mainClient)
-      this._mainClientHandler = handler
+      this._mainCalleeSecureHash = calleeSecureHash
   }
 
   public initListening() :Promise<void> {
@@ -51,39 +61,41 @@ export class WSS implements FACalleeCommunication {
 
   private _treatIncomingMessage(ws :any /*:WebSocket*/, message :string) {
     let messageObj :FAMessageObj = JSON.parse(message)
-    _console.log('')
-    _console.log('Received message :')
-    _console.log(message)
-    _console.log('')
+    _console.log("\n\nReceived message :")
+    _console.log(`${message}\n`)
+    let calleeSecureHash = (messageObj.dstSecureHash ? messageObj.dstSecureHash : this._mainCalleeSecureHash);
+    let callerWSInfos :CallersWSInfo = this._callersWSInfo[calleeSecureHash]
 
-    if (! this._secureHashToGUID[messageObj.srcSecureHash]) {
-      // The secure HASH is for the first a simple GUID => we store temporary the client socket in a hash
-      this._GUIDToSocket[messageObj.srcSecureHash] = ws
+    _console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos")
+    if (! callerWSInfos.secureHashToGUID[messageObj.srcSecureHash]) {
+      // The secure HASH is, for the first caller request, a simple GUID => we store temporary the client socket in a hash
+      callerWSInfos.GUIDToSocket[messageObj.srcSecureHash] = ws
     }
 
-    if (! messageObj.dstSecureHash) {
-      this._mainClientHandler(messageObj.message)
-    }
-    else {
-      this._clientMessageHandlers[messageObj.dstSecureHash](messageObj.message)
-    }
+    this._calleeMessageHandlers[calleeSecureHash](messageObj.message)
   }
 
-  public registerSecureHash(GUID :string, secureHash :string) {
-    _console.assert(GUID && GUID.length, 'GUID must be a non null string')
-    _console.assert(secureHash && secureHash.length, 'secureHash must be a non null string')
-    _console.assert(this._GUIDToSocket[GUID], 'GUID must have been stored as an id for socket in Communication instance')
+  public registerCallerSecureHash(calleeSecureHash :string, callerGUID :string, callerSecureHash :string) {
+    _console.assert(callerGUID && callerGUID.length, 'callerGUID must be a non null string')
+    _console.assert(callerSecureHash && callerSecureHash.length, 'callerSecureHash must be a non null string')
 
-    this._secureHashToSocket[secureHash] = this._GUIDToSocket[GUID]
-    this._secureHashToGUID[secureHash] = GUID
-    this._GUIDToSocket[GUID] = undefined
+    let callerWSInfos :CallersWSInfo = this._callersWSInfo[calleeSecureHash]
+    _console.assert(callerWSInfos, `The callee (${calleeSecureHash}) is not known, not possible to get back its callers' infos`, this._callersWSInfo)
+    _console.assert(callerWSInfos.GUIDToSocket[callerGUID], 'GUID must have been stored as an id for socket in Communication instance')
+
+    callerWSInfos.secureHashToSocket[callerSecureHash] = callerWSInfos.GUIDToSocket[callerGUID]
+    callerWSInfos.secureHashToGUID[callerSecureHash] = callerGUID
+    callerWSInfos.GUIDToSocket[callerGUID] = undefined
   }
 
-  public send(srcSecureHash :string, destSecureHash :string, message :string) {
-    let socket = this._secureHashToSocket[destSecureHash]
+  public send(calleeSecureHash :string, callerSecureHash :string, message :string) {
+    let callerWSInfos :CallersWSInfo = this._callersWSInfo[calleeSecureHash]
+    _console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos")
+
+    let socket = callerWSInfos.secureHashToSocket[callerSecureHash]
 
     if (socket.readyState === OPEN) {
-      socket.send(JSON.stringify({ srcSecureHash, message }))
+      socket.send(JSON.stringify({ calleeSecureHash, message }))
     }
     else {
       _console.error('The socket of the caller seems not to be in readyState')

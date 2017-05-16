@@ -1,18 +1,16 @@
 import { FACalleeCommunication } from "../../interfaces";
 export declare class WSS implements FACalleeCommunication {
     private _wss;
-    private _clientMessageHandlers;
-    private _mainClientHandler;
+    private _calleeMessageHandlers;
+    private _mainCalleeSecureHash;
     private _host;
     private _port;
     private _wsTab;
-    private _GUIDToSocket;
-    private _secureHashToSocket;
-    private _secureHashToGUID;
+    private _callersWSInfo;
     constructor(host?: string, port?: string, options?: any);
-    onMessage(secureHash: string, handler: (data: string) => string, mainClient?: boolean): void;
+    onMessage(calleeSecureHash: string, handler: (data: string) => string, mainClient?: boolean): void;
     initListening(): Promise<void>;
     private _treatIncomingMessage(ws, message);
-    registerSecureHash(GUID: string, secureHash: string): void;
-    send(srcSecureHash: string, destSecureHash: string, message: string): void;
+    registerCallerSecureHash(calleeSecureHash: string, callerGUID: string, callerSecureHash: string): void;
+    send(calleeSecureHash: string, callerSecureHash: string, message: string): void;
 }

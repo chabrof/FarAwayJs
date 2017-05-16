@@ -15,21 +15,24 @@
         function WSS(host, port, options) {
             if (host === void 0) { host = "localhost"; }
             if (port === void 0) { port = "8080"; }
-            this._clientMessageHandlers = [];
+            this._calleeMessageHandlers = [];
             this._wsTab = [];
-            this._GUIDToSocket = {};
-            this._secureHashToSocket = {};
-            this._secureHashToGUID = {};
+            this._callersWSInfo = {};
             _debug_1._console.assert(host && host.length, 'host must be a non null string');
             _debug_1._console.assert(port && port.length, 'port must be a non null string');
             this._host = host;
             this._port = port;
         }
-        WSS.prototype.onMessage = function (secureHash, handler, mainClient) {
+        WSS.prototype.onMessage = function (calleeSecureHash, handler, mainClient) {
             if (mainClient === void 0) { mainClient = true; }
-            this._clientMessageHandlers[secureHash] = handler;
+            this._calleeMessageHandlers[calleeSecureHash] = handler;
+            this._callersWSInfo[calleeSecureHash] = {
+                GUIDToSocket: {},
+                secureHashToSocket: {},
+                secureHashToGUID: {}
+            };
             if (mainClient)
-                this._mainClientHandler = handler;
+                this._mainCalleeSecureHash = calleeSecureHash;
         };
         WSS.prototype.initListening = function () {
             var _this = this;
@@ -51,33 +54,33 @@
         };
         WSS.prototype._treatIncomingMessage = function (ws /*:WebSocket*/, message) {
             var messageObj = JSON.parse(message);
-            _debug_1._console.log('');
-            _debug_1._console.log('Received message :');
-            _debug_1._console.log(message);
-            _debug_1._console.log('');
-            if (!this._secureHashToGUID[messageObj.srcSecureHash]) {
-                // The secure HASH is for the first a simple GUID => we store temporary the client socket in a hash
-                this._GUIDToSocket[messageObj.srcSecureHash] = ws;
+            _debug_1._console.log("\n\nReceived message :");
+            _debug_1._console.log(message + "\n");
+            var calleeSecureHash = (messageObj.dstSecureHash ? messageObj.dstSecureHash : this._mainCalleeSecureHash);
+            var callerWSInfos = this._callersWSInfo[calleeSecureHash];
+            _debug_1._console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos");
+            if (!callerWSInfos.secureHashToGUID[messageObj.srcSecureHash]) {
+                // The secure HASH is, for the first caller request, a simple GUID => we store temporary the client socket in a hash
+                callerWSInfos.GUIDToSocket[messageObj.srcSecureHash] = ws;
             }
-            if (!messageObj.dstSecureHash) {
-                this._mainClientHandler(messageObj.message);
-            }
-            else {
-                this._clientMessageHandlers[messageObj.dstSecureHash](messageObj.message);
-            }
+            this._calleeMessageHandlers[calleeSecureHash](messageObj.message);
         };
-        WSS.prototype.registerSecureHash = function (GUID, secureHash) {
-            _debug_1._console.assert(GUID && GUID.length, 'GUID must be a non null string');
-            _debug_1._console.assert(secureHash && secureHash.length, 'secureHash must be a non null string');
-            _debug_1._console.assert(this._GUIDToSocket[GUID], 'GUID must have been stored as an id for socket in Communication instance');
-            this._secureHashToSocket[secureHash] = this._GUIDToSocket[GUID];
-            this._secureHashToGUID[secureHash] = GUID;
-            this._GUIDToSocket[GUID] = undefined;
+        WSS.prototype.registerCallerSecureHash = function (calleeSecureHash, callerGUID, callerSecureHash) {
+            _debug_1._console.assert(callerGUID && callerGUID.length, 'callerGUID must be a non null string');
+            _debug_1._console.assert(callerSecureHash && callerSecureHash.length, 'callerSecureHash must be a non null string');
+            var callerWSInfos = this._callersWSInfo[calleeSecureHash];
+            _debug_1._console.assert(callerWSInfos, "The callee (" + calleeSecureHash + ") is not known, not possible to get back its callers' infos", this._callersWSInfo);
+            _debug_1._console.assert(callerWSInfos.GUIDToSocket[callerGUID], 'GUID must have been stored as an id for socket in Communication instance');
+            callerWSInfos.secureHashToSocket[callerSecureHash] = callerWSInfos.GUIDToSocket[callerGUID];
+            callerWSInfos.secureHashToGUID[callerSecureHash] = callerGUID;
+            callerWSInfos.GUIDToSocket[callerGUID] = undefined;
         };
-        WSS.prototype.send = function (srcSecureHash, destSecureHash, message) {
-            var socket = this._secureHashToSocket[destSecureHash];
+        WSS.prototype.send = function (calleeSecureHash, callerSecureHash, message) {
+            var callerWSInfos = this._callersWSInfo[calleeSecureHash];
+            _debug_1._console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos");
+            var socket = callerWSInfos.secureHashToSocket[callerSecureHash];
             if (socket.readyState === ws_1.OPEN) {
-                socket.send(JSON.stringify({ srcSecureHash: srcSecureHash, message: message }));
+                socket.send(JSON.stringify({ calleeSecureHash: calleeSecureHash, message: message }));
             }
             else {
                 _debug_1._console.error('The socket of the caller seems not to be in readyState');

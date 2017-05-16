@@ -1,8 +1,8 @@
-import { _console } from "./_debug"
-import { FACallerCommunication } from "./interfaces"
-import { debugOn } from "./_debug"
-import { generateError } from "./error"
-import * as Chance from "chance"
+import { _console }               from "./_debug"
+import { FACallerCommunication, CallerBackCreate, CallerBCInitData }  from "./interfaces"
+import { debugOn }                from "./_debug"
+import { generateError }          from "./error"
+import * as Chance                from "chance"
 
 let _callables = {}
 let _rCallIdx = 0
@@ -12,15 +12,20 @@ let _com :FACallerCommunication, _comReadyPromise :Promise<void>
 let _importedInstiables = {}
 
 // unique guid for caller instance
-let _guid :string
-let _secureHash :string
-
+let _myCallerGUID :string
+let _myCallerSecureHash :string
+let _backCreates :{[name :string]: CallerBackCreate} = {}
 
 function setCommunication(communication :FACallerCommunication) :Promise<any> {
   _com = communication
   _com.onMessage(_messageCbk)
   _comReadyPromise = _com.initListening()
   return _comReadyPromise
+}
+
+function regBackCreateObject(name :string, backCreateObject :CallerBackCreate) {
+  _console.assert(name, name.length, "name of BackCreateObject must be a not null string")
+  _backCreates[name] = backCreateObject
 }
 
 let _messageCbk = function(data) {
@@ -30,7 +35,7 @@ let _messageCbk = function(data) {
   }
   catch (e) {
     _console.error(`JSON.parse error: ${data.message}`, e);
-    generateError(_secureHash, _com, 3, "Message is not in the good format")
+    generateError(_myCallerSecureHash, _com, 3, "Message is not in the good format")
   }
 
   try {
@@ -38,7 +43,7 @@ let _messageCbk = function(data) {
   }
   catch (e) {
     if (e.send) {
-      generateError(_secureHash, _com, 1, e.message)
+      generateError(_myCallerSecureHash, _com, 1, e.message)
     }
     else {
       console.error('Error : ', e.message, e.stack)
@@ -54,14 +59,44 @@ _treat.farError = function(errorObj) {
 _treat.farCallReturn = function(callObj :any) {
   _console.log('treat_rCallReturn', callObj, _promiseOkCbksH)
   if (typeof callObj.rIdx !== "number") {
-  throw {
+    throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
-      "send" : false
+      "send"    : false
     }
   }
   let ret = callObj.return
-  _console.log('ici', typeof _promiseOkCbksH[callObj.rIdx]);
+  _console.log('ici', typeof _promiseOkCbksH[callObj.rIdx])
   _promiseOkCbksH[callObj.rIdx](ret) // complete the associated Promise
+}
+
+_treat.farBackCreateReturn = function(callObj :any) {
+  _console.log('treat_rInstantiateReturn', callObj)
+  if (typeof callObj.rIdx !== "number") {
+    throw {
+      "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
+      "send"    : false
+    }
+  }
+  let ret :CallerBCInitData = callObj.return as CallerBCInitData
+  // Instantiate the "BackCreate" object
+  if (! _backCreates[ret.constructorName]) {
+    let availableBCObjectsStr = ""
+    let zeroIdxFlag = true
+    for (let i in _backCreates) {
+      availableBCObjectsStr += ((!zeroIdxFlag ? ', ' : '') + i)
+      zeroIdxFlag = false
+    }
+    throw {
+      "message" : `backCreateConstructor (${ret.constructorName}) is not registered by the caller (${_myCallerGUID}). Avalaible objects : ${availableBCObjectsStr}.`,
+      "send"    : true
+    }
+  }
+  ret.constructorArgs.unshift(null)
+  console.log('---> back create', ret.constructorName, _backCreates, ret.constructorArgs)
+  let backCreateInst = new (Function.prototype.bind.apply(_backCreates[ret.constructorName], ret.constructorArgs))
+  _console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise")
+  backCreateInst.init.apply(backCreateInst, ret.initArgs)
+    .then(() => _promiseOkCbksH[callObj.rIdx](backCreateInst))
 }
 
 _treat.farInstantiateReturn = function(callObj) {
@@ -69,7 +104,7 @@ _treat.farInstantiateReturn = function(callObj) {
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
-      "send" : false
+      "send"    : false
     }
   }
 
@@ -82,14 +117,14 @@ _treat.farImportReturn = function(callObj) {
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
-      "send" : false
+      "send"    : false
     }
   }
-  _secureHash = callObj.secureHash
-  if (! _secureHash) {
+  _myCallerSecureHash = callObj.callerSecureHash
+  if (! _myCallerSecureHash) {
     throw {
-      "message" : "_secureHash is empty or invalid in response",
-      "send" : false
+      "message" : "_myCallerSecureHash is empty or invalid in response",
+      "send"    : false
     }
   }
   let wrapObjects = _createWrappingObjects(callObj.objects)
@@ -156,13 +191,13 @@ function _extractArgs(argsIn :any) {
   for (let ct = 1; ct < argsIn.length; ct++) {
     argsOut.push(argsIn[ct]);
   }
-  return argsOut;
+    return argsOut;
 }
 
 function farCall(objectName :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
   _console.log('farCall : ', objectName, args)
   _console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation')
-  _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
+  _console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
   if (typeof objectName !== "string" || ! objectName.length) {
     throw {
@@ -173,19 +208,18 @@ function farCall(objectName :string, args :any[] = [], instanceIdx :number = und
   let idx = _getRCallIdx()
   let promise = new Promise((ok, ko) => { _promiseOkCbksH[idx] = ok })
   _comReadyPromise.then(() => {
-      _com.send(_secureHash,
+      _com.send(_myCallerSecureHash,
                 JSON.stringify({
-                    "type"        : "farCall",
-                    "objectName"  : objectName,
-                    "args"        : args,
-                    "instanceIdx" : instanceIdx,
-                    "rIdx"        : idx,
-                    "secureHash"  : _secureHash
+                    "type"              : "farCall",
+                    "objectName"        : objectName,
+                    "args"              : args,
+                    "instanceIdx"       : instanceIdx,
+                    "rIdx"              : idx,
+                    "callerSecureHash"  : _myCallerSecureHash
                   }))
     })
   return promise
 }
-
 
 function farImport(objNames :string[]) :any {
   _console.log('farImport : ', objNames)
@@ -193,15 +227,15 @@ function farImport(objNames :string[]) :any {
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
   let chance = new Chance()
-  _guid = chance.guid()
+  _myCallerGUID = chance.guid()
   _comReadyPromise.then(
     function() {
-      _com.send(_guid,
+        _com.send(_myCallerGUID,
                 JSON.stringify({
-                    "type"    : "farImport",
-                    "rIdx"    : idx,
-                    "GUID"    : _guid,
-                    "symbols" : objNames
+                    "type"        : "farImport",
+                    "rIdx"        : idx,
+                    "callerGUID"  : _myCallerGUID,
+                    "symbols"     : objNames
                   }))
     })
   return promise
@@ -209,19 +243,19 @@ function farImport(objNames :string[]) :any {
 
 function farInstantiate (constructorName :string, args :any[] = []) :Promise<any> {
   _console.log('farInstantiate : ', constructorName)
-  _console.assert(_secureHash, 'secureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
+  _console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
   _comReadyPromise.then(
     function() {
-      _com.send(_secureHash,
+      _com.send(_myCallerSecureHash,
                 JSON.stringify({
                     "type"             : "farInstantiate",
                     "constructorName"  : constructorName,
                     "rIdx"             : idx,
                     "args"             : args,
-                    "secureHash"       : _secureHash
+                    "callerSecureHash" : _myCallerSecureHash
                   }))
     })
   return promise
@@ -232,5 +266,6 @@ export let farAwayCaller = {
   setCommunication : setCommunication,
   farCall :farCall,
   farInstantiate :farInstantiate,
-  farImport :farImport
+  farImport :farImport,
+  regBackCreateObject : regBackCreateObject
 }

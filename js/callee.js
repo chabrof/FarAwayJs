@@ -19,11 +19,11 @@
     var _com, _comReadyPromise;
     var _instancesH = {};
     var _magicToken = new Chance().guid();
-    var _secureHashes = {};
-    var _mySecureHash = secure_hash_1.generateSecureHash(_magicToken, new Chance().guid());
+    var _callerSecureHashes = {};
+    var _myCalleeSecureHash = secure_hash_1.generateSecureHash(_magicToken, new Chance().guid());
     var setCommunication = function (communication) {
         _com = communication;
-        _com.onMessage(_mySecureHash, _messageCbk);
+        _com.onMessage(_myCalleeSecureHash, _messageCbk);
         _comReadyPromise = _com.initListening();
         return _comReadyPromise;
     };
@@ -33,7 +33,7 @@
             messageObj = JSON.parse(data);
         }
         catch (e) {
-            _debug_1._console.error("JSON parse error, message is not in the good format :" + data);
+            _debug_1._console.error("JSON parse error, message is not in the good format : " + data);
             return;
         }
         var secureHash;
@@ -42,17 +42,17 @@
         }
         catch (e) {
             if (e.send && e.secureHash) {
-                error_1.generateError(_mySecureHash, _com, 1, e.message, e.secureHash);
+                error_1.generateError(_myCalleeSecureHash, _com, 1, e.message, e.secureHash);
             }
             else {
-                _debug_1._console.error("Error on treat of type(" + messageObj.type + ") : ", e.message, e.stack);
+                _debug_1._console.error("Error (not sent) on treat of type(" + messageObj.type + ") : ", e);
             }
         }
         return secureHash;
     };
     function regInstantiable(object, excludeCalls, objectName) {
         if (objectName === void 0) { objectName = undefined; }
-        _debug_1._console.assert(typeof object === 'function' && object, 'Entity must be a not null function (' + object + ' given)');
+        _debug_1._console.assert(typeof object === 'function' && object, "Entity must be a not null function (" + object + " given)");
         _callables[objectName ? objectName : object.name] = new CallableObject(object, "instantiable", excludeCalls);
     }
     var CallableObject = (function () {
@@ -86,13 +86,13 @@
         console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)');
         _callables[funcName ? funcName : funcName.name] = new CallableObject(func, "function");
     }
-    var _checkSecureHash = function (secureHash, instanceIdx) {
-        if (_secureHashes[secureHash] === undefined) {
-            error_1.generateError(_mySecureHash, _com, 4, 'The client seems not to be registered, it must call farImport before further operation and then pass secureHash on each request', secureHash);
+    var _checkSecureHash = function (callerSecureHash, instanceIdx) {
+        if (_callerSecureHashes[callerSecureHash] === undefined) {
+            error_1.generateError(_myCalleeSecureHash, _com, 4, "The caller (" + callerSecureHash + ") seems not to be registered, it must call farImport before further operation and then pass secureHash on each request", callerSecureHash);
             return false;
         }
-        if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== secureHash) {
-            error_1.generateError(_mySecureHash, _com, 4, 'The client is not allowed to access this ressource', secureHash);
+        if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== callerSecureHash) {
+            error_1.generateError(_myCalleeSecureHash, _com, 4, 'The caller is not allowed to access this ressource', callerSecureHash);
             return false;
         }
         return true;
@@ -101,44 +101,49 @@
     _treat.farInstantiate = function (constructorObj) {
         _debug_1._console.log('treat.farInstantiate', constructorObj);
         _debug_1._console.assert(_com, 'communication must be set before calling this function');
-        if (!_checkSecureHash(constructorObj.secureHash))
+        if (!_checkSecureHash(constructorObj.callerSecureHash))
             return; // -->
         var Constructor = _extractConstructorReferenceWName(constructorObj);
         try {
             constructorObj.args.unshift(null);
             var instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args));
-            _instancesH[constructorObj.rIdx] = { "instance": instance, "secureHash": constructorObj.secureHash };
+            _instancesH[constructorObj.rIdx] = { "instance": instance, "secureHash": constructorObj.callerSecureHash };
         }
         catch (e) {
-            throw constructorObj.constructorName + "seems not to be a valid constructor";
+            _debug_1._console.error(e);
+            throw constructorObj.constructorName + " seems not to be a valid constructor";
         }
-        _com.send(_mySecureHash, constructorObj.secureHash, JSON.stringify({
+        _com.send(_myCalleeSecureHash, constructorObj.callerSecureHash, JSON.stringify({
             "type": "farInstantiateReturn",
             "rIdx": constructorObj.rIdx
         }));
-        return constructorObj.secureHash;
+        return constructorObj.callerSecureHash;
     };
     _treat.farCall = function (callObj) {
         _debug_1._console.log('treat.farCall', callObj);
         _debug_1._console.assert(_com, 'communication must be set before calling this function');
-        if (!_checkSecureHash(callObj.secureHash, callObj.instanceIdx))
+        if (!_checkSecureHash(callObj.callerSecureHash, callObj.instanceIdx))
             return; // -->
         if (typeof callObj.objectName !== "string" || !callObj.objectName.length) {
             throw {
                 "message": "objectName is empty or invalid : " + callObj.objectName,
                 "send": true,
-                "secureHash": callObj.srcSecureHash
+                "secureHash": callObj.callerSecureHash
             };
         }
         var obj = _extractObjectReferenceWName(callObj);
         var ret = obj();
+        if (ret.getBCInitDataForCaller) {
+            _sendBackCreateReturn(callObj, ret);
+            return;
+        }
         if (ret instanceof Promise) {
             ret
-                .then(function (ret) { _sendFarCallReturn(callObj.secureHash, callObj, ret); })
-                .catch(function (error) { error_1.generateError(_mySecureHash, _com, 10, error, callObj.srcSecureHash); });
+                .then(function (ret) { _sendFarCallReturn(callObj, ret); })
+                .catch(function (error) { error_1.generateError(_myCalleeSecureHash, _com, 10, error, callObj.callerSecureHash); });
         }
         else {
-            _sendFarCallReturn(callObj.secureHash, callObj, ret);
+            _sendFarCallReturn(callObj, ret);
         }
     };
     _treat.farImport = function (callObj) {
@@ -147,14 +152,14 @@
             throw {
                 "message": "List of symbols is empty or invalid : " + callObj.symbols,
                 "send": true,
-                "secureHash": callObj.srcSecureHash
+                "callerSecureHash": callObj.callerSecureHash
             };
         }
-        if (!callObj.GUID) {
+        if (!callObj.callerGUID) {
             throw {
                 "message": "GUID must be provided",
                 "send": true,
-                "secureHash": null
+                "callerSecureHash": null
             };
         }
         var result = [];
@@ -163,36 +168,44 @@
                 throw {
                     "message": "Symbol '" + symbol + "' does not exist in callee",
                     "send": true,
-                    "secureHash": callObj.GUID
+                    "calleSecureHash": callObj.callerGUID
                 };
             }
             result.push(_callables[symbol]);
         });
-        // srcSecureHash is just a GUID, we generate secureHash with it
-        var destSecureHash = secure_hash_1.generateSecureHash(_magicToken, callObj.GUID);
-        // register client
-        _secureHashes[destSecureHash] = true;
-        _com.registerSecureHash(callObj.GUID, destSecureHash);
+        // CallerSecureHash is just a GUID, we generate callerSecureHash with it
+        var callerSecureHash = secure_hash_1.generateSecureHash(_magicToken, callObj.callerGUID);
+        // Register client
+        _callerSecureHashes[callerSecureHash] = true;
+        _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash);
         // At this point, caller must provide its secureHash
         setTimeout(function () {
-            _com.send(_mySecureHash, destSecureHash, JSON.stringify({
+            _com.send(_myCalleeSecureHash, callerSecureHash, JSON.stringify({
                 "type": "farImportReturn",
                 "rIdx": callObj.rIdx,
-                "secureHash": destSecureHash,
+                "callerSecureHash": callerSecureHash,
                 "objects": result
             }));
         }, 0);
     };
-    function _sendFarCallReturn(secureHash, callObj, ret) {
-        _debug_1._console.log('_sendFarCallReturn', ret);
-        _com.send(_mySecureHash, secureHash, JSON.stringify({
+    function _sendFarCallReturn(callObj, ret) {
+        _debug_1._console.log("\n_sendFarCallReturn", ret);
+        _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
             "type": "farCallReturn",
             "rIdx": callObj.rIdx,
             "return": ret
         }));
     }
+    function _sendBackCreateReturn(callObj, ret) {
+        _debug_1._console.log("\n_sendBackCreateReturn", ret.getBCInitDataForCaller());
+        _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
+            "type": "farBackCreateReturn",
+            "rIdx": callObj.rIdx,
+            "return": ret.getBCInitDataForCaller()
+        }));
+    }
     function _extractConstructorReferenceWName(callObj) {
-        _debug_1._console.log('_extractConstructorReferenceWName', callObj);
+        _debug_1._console.log("\n_extractConstructorReferenceWName", callObj);
         var obj = _callables[callObj.constructorName].object;
         var objNameTab = callObj.constructorName.split('.');
         for (var ct = 1; ct < objNameTab.length; ct++) {
@@ -201,7 +214,7 @@
                 throw {
                     "message": "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
                     "send": true,
-                    "secureHash": callObj.srcSecureHash
+                    "secureHash": callObj.callerSecureHash
                 };
             }
         }
@@ -209,13 +222,13 @@
             throw {
                 "message": "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
                 "send": true,
-                "secureHash": callObj.srcSecureHash
+                "callerSecureHash": callObj.callerSecureHash
             };
         }
         return obj;
     }
     function _extractObjectReferenceWName(callObj) {
-        _debug_1._console.log('_extractConstructorReferenceWName', callObj);
+        _debug_1._console.log("\n_extractObjectReferenceWName", callObj);
         var obj;
         var context;
         var objNameTab = callObj.objectName.split('.');
@@ -231,7 +244,7 @@
                     throw {
                         "message": "Object " + callObj.objectName + " does not exist in callee ('" + callObj.objectName + "' called)",
                         "send": true,
-                        "secureHash": callObj.srcSecureHash
+                        "callerSecureHash": callObj.callerSecureHash
                     };
                 }
             }
@@ -239,12 +252,12 @@
         }
         if (!obj || typeof obj !== 'function') {
             throw {
-                "message": "Object " + callObj.objectName + ' does not exist ' + (callObj.instanceId ? "(in instance) " : "") + "in callee ('" + callObj.objectName + "' called)",
+                "message": "Object " + callObj.objectName + " does not exist " + (callObj.instanceId ? "(in instance) " : "") + ("in callee ('" + callObj.objectName + "' called)"),
                 "send": true,
-                "secureHash": callObj.srcSecureHash
+                "callerSecureHash": callObj.callerSecureHash
             };
         }
-        return function () { console.log('context', context); return obj.apply(context, callObj.args); };
+        return function () { return obj.apply(context, callObj.args); };
     }
     exports.farAwayCallee = {
         debugOn: _debug_2.debugOn,
