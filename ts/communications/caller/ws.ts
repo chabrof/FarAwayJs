@@ -39,7 +39,7 @@ export class WS implements FACallerCommunication {
     return promise
   }
 
-  public send(srcSecureHash :string, message :string, destSecureHash? :string) {
-    this._ws.send(JSON.stringify({ srcSecureHash, message}))
+  public send(calleeSecureHash :string, callerSecureHash :string, message :string) {
+    this._ws.send(JSON.stringify({ calleeSecureHash, callerSecureHash, message}))
   }
 }

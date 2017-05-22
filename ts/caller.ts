@@ -57,7 +57,7 @@ _treat.farError = function(errorObj) {
 }
 
 _treat.farCallReturn = function(callObj :any) {
-  _console.log('treat_rCallReturn', callObj, _promiseOkCbksH)
+  _console.log('treat.farCallReturn', callObj, _promiseOkCbksH)
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -70,7 +70,7 @@ _treat.farCallReturn = function(callObj :any) {
 }
 
 _treat.farBackCreateReturn = function(callObj :any) {
-  _console.log('treat_rInstantiateReturn', callObj)
+  _console.log('treat.farBackCreateReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -96,11 +96,14 @@ _treat.farBackCreateReturn = function(callObj :any) {
   let backCreateInst = new (Function.prototype.bind.apply(_backCreates[ret.constructorName], ret.constructorArgs))
   _console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise")
   backCreateInst.init.apply(backCreateInst, ret.initArgs)
-    .then(() => _promiseOkCbksH[callObj.rIdx](backCreateInst))
+    .then(() => {
+        _console.log('PROMISE RETURNE')
+        _promiseOkCbksH[callObj.rIdx](backCreateInst)
+      })
 }
 
 _treat.farInstantiateReturn = function(callObj) {
-  _console.log('treat_rInstantiateReturn', callObj)
+  _console.log('treat.farInstantiateReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -208,7 +211,8 @@ function farCall(objectName :string, args :any[] = [], instanceIdx :number = und
   let idx = _getRCallIdx()
   let promise = new Promise((ok, ko) => { _promiseOkCbksH[idx] = ok })
   _comReadyPromise.then(() => {
-      _com.send(_myCallerSecureHash,
+      _com.send(null,
+                _myCallerSecureHash,
                 JSON.stringify({
                     "type"              : "farCall",
                     "objectName"        : objectName,
@@ -230,13 +234,14 @@ function farImport(objNames :string[]) :any {
   _myCallerGUID = chance.guid()
   _comReadyPromise.then(
     function() {
-        _com.send(_myCallerGUID,
-                JSON.stringify({
-                    "type"        : "farImport",
-                    "rIdx"        : idx,
-                    "callerGUID"  : _myCallerGUID,
-                    "symbols"     : objNames
-                  }))
+        _com.send(null,
+                  _myCallerGUID,
+                  JSON.stringify({
+                      "type"        : "farImport",
+                      "rIdx"        : idx,
+                      "callerGUID"  : _myCallerGUID,
+                      "symbols"     : objNames
+                    }))
     })
   return promise
 }
@@ -249,7 +254,8 @@ function farInstantiate (constructorName :string, args :any[] = []) :Promise<any
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
   _comReadyPromise.then(
     function() {
-      _com.send(_myCallerSecureHash,
+      _com.send(null,
+                _myCallerSecureHash,
                 JSON.stringify({
                     "type"             : "farInstantiate",
                     "constructorName"  : constructorName,

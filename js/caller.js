@@ -58,7 +58,7 @@
         _debug_1._console.error("Error on simpleRpc", errorObj.error);
     };
     _treat.farCallReturn = function (callObj) {
-        _debug_1._console.log('treat_rCallReturn', callObj, _promiseOkCbksH);
+        _debug_1._console.log('treat.farCallReturn', callObj, _promiseOkCbksH);
         if (typeof callObj.rIdx !== "number") {
             throw {
                 "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -70,7 +70,7 @@
         _promiseOkCbksH[callObj.rIdx](ret); // complete the associated Promise
     };
     _treat.farBackCreateReturn = function (callObj) {
-        _debug_1._console.log('treat_rInstantiateReturn', callObj);
+        _debug_1._console.log('treat.farBackCreateReturn', callObj);
         if (typeof callObj.rIdx !== "number") {
             throw {
                 "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -96,10 +96,13 @@
         var backCreateInst = new (Function.prototype.bind.apply(_backCreates[ret.constructorName], ret.constructorArgs));
         _debug_1._console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise");
         backCreateInst.init.apply(backCreateInst, ret.initArgs)
-            .then(function () { return _promiseOkCbksH[callObj.rIdx](backCreateInst); });
+            .then(function () {
+            _debug_1._console.log('PROMISE RETURNE');
+            _promiseOkCbksH[callObj.rIdx](backCreateInst);
+        });
     };
     _treat.farInstantiateReturn = function (callObj) {
-        _debug_1._console.log('treat_rInstantiateReturn', callObj);
+        _debug_1._console.log('treat.farInstantiateReturn', callObj);
         if (typeof callObj.rIdx !== "number") {
             throw {
                 "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -197,7 +200,7 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(_myCallerSecureHash, JSON.stringify({
+            _com.send(null, _myCallerSecureHash, JSON.stringify({
                 "type": "farCall",
                 "objectName": objectName,
                 "args": args,
@@ -215,7 +218,7 @@
         var chance = new Chance();
         _myCallerGUID = chance.guid();
         _comReadyPromise.then(function () {
-            _com.send(_myCallerGUID, JSON.stringify({
+            _com.send(null, _myCallerGUID, JSON.stringify({
                 "type": "farImport",
                 "rIdx": idx,
                 "callerGUID": _myCallerGUID,
@@ -231,7 +234,7 @@
         var idx = _getRCallIdx();
         var promise = new Promise(function (ok, ko) { _promiseOkCbksH[idx] = ok; });
         _comReadyPromise.then(function () {
-            _com.send(_myCallerSecureHash, JSON.stringify({
+            _com.send(null, _myCallerSecureHash, JSON.stringify({
                 "type": "farInstantiate",
                 "constructorName": constructorName,
                 "rIdx": idx,

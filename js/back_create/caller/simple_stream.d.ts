@@ -5,8 +5,15 @@ export declare class SimpleStream implements CallerBackCreate {
     private _port;
     private _listeners;
     private _listenersByType;
-    constructor(host?: string, port?: string, options?: any);
+    private _treat;
+    private _mySecureHash;
+    private _handShakeOkPromise;
+    private _myCallerGUID;
+    private _calleeSecureHash;
+    constructor(host: string, port: string, calleeSecureHash: string);
     init(): Promise<void>;
+    private _farHandShake();
+    private _treatFarHandShakeReturn(callObj);
     private _messageHandler(event);
     addEventListener: (cbk: (args: any) => any) => number;
     removeEventListener: (listenerIdx: any) => void;

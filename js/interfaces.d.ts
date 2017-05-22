@@ -1,13 +1,14 @@
 export interface FASending {
-    send: (srcSecureHash: string, message: string, destSecureHash?: string) => void;
+    send: (calleeSecureHash: string, callerSecureHash: string, message: string) => void;
 }
 export interface FACallerCommunication extends FASending {
     initListening: () => Promise<void>;
     onMessage: (handler: (data: string) => void) => void;
+    send: (calleeSecureHash: string, callerSecureHash: string, message: string) => void;
 }
 export interface FACalleeCommunication extends FASending {
     initListening: () => Promise<void>;
-    onMessage: (calleeSecureHash: string, handler: (data: string) => void) => void;
+    onMessage: (calleeSecureHash: string, handler: (data: string) => void, mainClient?: boolean) => void;
     registerCallerSecureHash: (calleeSecureHash: string, callerGUID: string, callerSecureHash: string) => void;
 }
 export interface TupleInstanceSecureHash {
@@ -15,8 +16,8 @@ export interface TupleInstanceSecureHash {
     instance: any;
 }
 export interface FAMessageObj {
-    "srcSecureHash": string;
-    "dstSecureHash": string;
+    "callerSecureHash": string;
+    "calleeSecureHash": string;
     "message": string;
 }
 export interface CallerBCInitData {

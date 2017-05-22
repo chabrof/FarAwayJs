@@ -27,7 +27,7 @@ export class WSS implements FACalleeCommunication {
     this._port = port
   }
 
-  public onMessage(calleeSecureHash :string, handler :(data :string) => string, mainClient :boolean = true) {
+  public onMessage(calleeSecureHash :string, handler :(data :string) => string, mainClient :boolean = false) {
     this._calleeMessageHandlers[calleeSecureHash] = handler
     this._callersWSInfo[calleeSecureHash] = {
         GUIDToSocket        : {},
@@ -63,15 +63,16 @@ export class WSS implements FACalleeCommunication {
     let messageObj :FAMessageObj = JSON.parse(message)
     _console.log("\n\nReceived message :")
     _console.log(`${message}\n`)
-    let calleeSecureHash = (messageObj.dstSecureHash ? messageObj.dstSecureHash : this._mainCalleeSecureHash);
+    let calleeSecureHash = (messageObj.calleeSecureHash ? messageObj.calleeSecureHash : this._mainCalleeSecureHash);
     let callerWSInfos :CallersWSInfo = this._callersWSInfo[calleeSecureHash]
 
     _console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos")
-    if (! callerWSInfos.secureHashToGUID[messageObj.srcSecureHash]) {
+    if (! callerWSInfos.secureHashToGUID[messageObj.callerSecureHash]) {
       // The secure HASH is, for the first caller request, a simple GUID => we store temporary the client socket in a hash
-      callerWSInfos.GUIDToSocket[messageObj.srcSecureHash] = ws
+      callerWSInfos.GUIDToSocket[messageObj.callerSecureHash] = ws
     }
-
+    _console.assert(typeof this._calleeMessageHandlers[calleeSecureHash] === 'function', 'The collee Handler have not been initialysed')
+    _console.log(`Call message handler on callee : ${calleeSecureHash}`)
     this._calleeMessageHandlers[calleeSecureHash](messageObj.message)
   }
 
@@ -92,8 +93,19 @@ export class WSS implements FACalleeCommunication {
     let callerWSInfos :CallersWSInfo = this._callersWSInfo[calleeSecureHash]
     _console.assert(callerWSInfos, "The callee is not known, not possible to get back its callers' infos")
 
-    let socket = callerWSInfos.secureHashToSocket[callerSecureHash]
+    if (callerSecureHash) {
+      let socket = callerWSInfos.secureHashToSocket[callerSecureHash]
+      this._send(calleeSecureHash, socket, message)
+    }
+    else {
+      // Kind of "broadCast"
+      for (let i in callerWSInfos.secureHashToSocket) {
+        this._send(calleeSecureHash, callerWSInfos.secureHashToSocket[i], message)
+      }
+    }
+  }
 
+  private _send(calleeSecureHash :string, socket, message :string) {
     if (socket.readyState === OPEN) {
       socket.send(JSON.stringify({ calleeSecureHash, message }))
     }

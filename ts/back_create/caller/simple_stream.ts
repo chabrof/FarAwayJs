@@ -1,5 +1,6 @@
 import { _console } from "../../_debug"
 import { CallerBackCreate } from "../../interfaces"
+import * as Chance from "chance"
 
 export class SimpleStream implements CallerBackCreate {
   private _ws :WebSocket
@@ -7,15 +8,23 @@ export class SimpleStream implements CallerBackCreate {
   private _port :string
   private _listeners :any[]
   private _listenersByType :any
+  private _treat :any  = {}
+  private _mySecureHash :string
+  private _handShakeOkPromise :() => void
+  private _myCallerGUID :string = new Chance().guid()
+  private _calleeSecureHash :string
 
-  constructor (host :string = "localhost", port :string = "8080", options? :any) {
+  constructor (host :string = "localhost", port :string = "8080", calleeSecureHash :string) {
     _console.assert(host && host.length, 'host must be a non null string')
     _console.assert(port && port.length, 'port must be a non null string')
+    _console.assert(calleeSecureHash && calleeSecureHash.length, 'calleeSecureHash must be a non null string')
     _console.log('host' + host, "port" + port)
     this._host = host
     this._port = port
     this._listeners = []
     this._listenersByType = {}
+    this._calleeSecureHash = calleeSecureHash
+    this._treat.farHandShakeReturn = (data) => this._treatFarHandShakeReturn(data);
   }
 
   public init() :Promise<void> {
@@ -24,20 +33,79 @@ export class SimpleStream implements CallerBackCreate {
     let wsServer = `ws://${this._host}:${this._port}`
     this._ws = new WebSocket(wsServer)
     let declareWsReady
-    let promise = new Promise<void>((ok, ko) => declareWsReady = ok)
+    let openingPromise = new Promise<void>((ok, ko) => declareWsReady = ok)
 
     this._ws.addEventListener('open', function() { declareWsReady() })
     this._ws.addEventListener('message', (event) => this._messageHandler(event), false)
-    return promise
+
+    let finalPromise = new Promise<any>(
+      (ok, ko) => {
+        this._handShakeOkPromise = ok
+      } )
+
+    openingPromise.then(() => this._farHandShake())
+
+    return finalPromise // this promise will be completed when farHandShakeReturn messagefrom Callee SimpleStream is received and treated
   }
 
-  private _messageHandler(event :MessageEvent) {
+  private _farHandShake() {
+    _console.log('SimpleStream farHandShake')
+
+    this._ws.send(  JSON.stringify({
+                        calleeSecureHash : this._calleeSecureHash,
+                        callerSecureHash : this._myCallerGUID,
+                        message : JSON.stringify({
+                                      "type"        : "farHandShake",
+                                      "callerGUID"  : this._myCallerGUID
+                                    })
+                      } ))
+  }
+
+  private _treatFarHandShakeReturn(callObj) {
+    _console.log('treat.farHandShakeReturn', callObj)
+    this._mySecureHash = callObj.callerSecureHash
+    if (! this._mySecureHash)
+      throw "_myCallerSecureHash is empty or invalid in response"
+    this._handShakeOkPromise(); // complete the finalPromise instantiated in init method
+  }
+
+  private _messageHandler(event :any) {
+    _console.log(`SimpleStream Caller message handler : listen by ${this._listeners.length} listeners`)
+    let data
+    try {
+      data = JSON.parse(event.data)
+    }
+    catch (e) {
+      throw "Data from stream is not in the good format"
+    }
+    let messageObj :any = null
+    try {
+      messageObj = JSON.parse(data.message)
+    }
+    catch (e) {
+      // it is a raw string message maybe
+    }
+
+    if (messageObj && messageObj.type && this._treat[messageObj.type]) {
+      // This is the result of the HandShake request (the first request)
+      let secureHash
+      try {
+        secureHash = this._treat[messageObj.type](messageObj)
+      }
+      catch (e) {
+        _console.error(`Error on treat of type(${messageObj.type}) : `, e)
+      }
+      return secureHash // --> return
+    }
+
+    // This is a "normal" stream event, we give it to the listeners
     if (this._listeners) {
-      this._listeners.forEach((listener) => listener.cbk(event))
+      this._listeners.forEach((listener) => listener.cbk(data.message))
     }
   }
 
   public addEventListener = function(cbk :(args :any) => any) {
+    _console.log('addEventListener')
     _console.assert(cbk && typeof cbk === "function",
       "Arg 'cbk' must be provided (function)" )
 

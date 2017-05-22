@@ -23,11 +23,12 @@
     var _myCalleeSecureHash = secure_hash_1.generateSecureHash(_magicToken, new Chance().guid());
     var setCommunication = function (communication) {
         _com = communication;
-        _com.onMessage(_myCalleeSecureHash, _messageCbk);
+        _com.onMessage(_myCalleeSecureHash, _messageCbk, true);
         _comReadyPromise = _com.initListening();
         return _comReadyPromise;
     };
     var _messageCbk = function (data) {
+        _debug_1._console.log('Caller message handler...');
         var messageObj;
         try {
             messageObj = JSON.parse(data);
@@ -147,6 +148,7 @@
         }
     };
     _treat.farImport = function (callObj) {
+        _debug_1._console.log('treat.farImport', callObj);
         _debug_1._console.assert(_com, 'communication must be set before calling this function');
         if (typeof callObj.symbols !== "object" || !callObj.symbols.length) {
             throw {
@@ -168,7 +170,7 @@
                 throw {
                     "message": "Symbol '" + symbol + "' does not exist in callee",
                     "send": true,
-                    "calleSecureHash": callObj.callerGUID
+                    "callerSecureHash": callObj.callerGUID
                 };
             }
             result.push(_callables[symbol]);
@@ -176,6 +178,8 @@
         // CallerSecureHash is just a GUID, we generate callerSecureHash with it
         var callerSecureHash = secure_hash_1.generateSecureHash(_magicToken, callObj.callerGUID);
         // Register client
+        _debug_1._console.log("--> Generate secure hash for GUID (" + callObj.callerGUID + ")");
+        _debug_1._console.log("    : " + callerSecureHash);
         _callerSecureHashes[callerSecureHash] = true;
         _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash);
         // At this point, caller must provide its secureHash

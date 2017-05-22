@@ -8,5 +8,5 @@ export declare class WS implements FACallerCommunication {
     onMessage(handler: (data: string) => string): void;
     private _messageHandler(event);
     initListening(): Promise<void>;
-    send(srcSecureHash: string, message: string, destSecureHash?: string): void;
+    send(calleeSecureHash: string, callerSecureHash: string, message: string): void;
 }

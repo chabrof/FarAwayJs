@@ -38,8 +38,8 @@
             this._ws.addEventListener('message', function (event) { return _this._messageHandler(event); });
             return promise;
         };
-        WS.prototype.send = function (srcSecureHash, message, destSecureHash) {
-            this._ws.send(JSON.stringify({ srcSecureHash: srcSecureHash, message: message }));
+        WS.prototype.send = function (calleeSecureHash, callerSecureHash, message) {
+            this._ws.send(JSON.stringify({ calleeSecureHash: calleeSecureHash, callerSecureHash: callerSecureHash, message: message }));
         };
         return WS;
     }());

@@ -13,4 +13,5 @@ export declare class WSS implements FACalleeCommunication {
     private _treatIncomingMessage(ws, message);
     registerCallerSecureHash(calleeSecureHash: string, callerGUID: string, callerSecureHash: string): void;
     send(calleeSecureHash: string, callerSecureHash: string, message: string): void;
+    private _send(calleeSecureHash, socket, message);
 }

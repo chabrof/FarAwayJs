@@ -15,12 +15,13 @@ let _myCalleeSecureHash = generateSecureHash(_magicToken, new Chance().guid())
 
 let setCommunication = function(communication :FACalleeCommunication) :Promise<any> {
   _com = communication
-  _com.onMessage(_myCalleeSecureHash, _messageCbk)
+  _com.onMessage(_myCalleeSecureHash, _messageCbk, true)
   _comReadyPromise = _com.initListening()
   return _comReadyPromise
 }
 
 let _messageCbk = function(data :string) {
+  _console.log('Caller message handler...')
   let messageObj :any
   try {
     messageObj = JSON.parse(data)
@@ -162,6 +163,7 @@ _treat.farCall = function(callObj) {
 }
 
 _treat.farImport = function(callObj) {
+  _console.log('treat.farImport', callObj)
   _console.assert(_com, 'communication must be set before calling this function')
   if (typeof callObj.symbols !== "object" || ! callObj.symbols.length) {
     throw {
@@ -184,7 +186,7 @@ _treat.farImport = function(callObj) {
         throw {
             "message"         : `Symbol '${symbol}' does not exist in callee`,
             "send"            : true,
-            "calleSecureHash" : callObj.callerGUID
+            "callerSecureHash" : callObj.callerGUID
           }
       }
       result.push(_callables[symbol])
@@ -192,6 +194,8 @@ _treat.farImport = function(callObj) {
   // CallerSecureHash is just a GUID, we generate callerSecureHash with it
   let callerSecureHash = generateSecureHash(_magicToken, callObj.callerGUID)
   // Register client
+  _console.log(`--> Generate secure hash for GUID (${callObj.callerGUID})`)
+  _console.log(`    : ${callerSecureHash}`);
   _callerSecureHashes[callerSecureHash] = true
 
   _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash)
