@@ -24,7 +24,7 @@
         };
         WS.prototype._messageHandler = function (event) {
             var data = JSON.parse(event.data);
-            console.log('--> Raw data', data);
+            //console.log('--> Raw data', data);
             this._clientMessageHandler(data);
         };
         WS.prototype.initListening = function () {

@@ -28,7 +28,6 @@
         return _comReadyPromise;
     };
     var _messageCbk = function (data) {
-        _debug_1._console.log('Caller message handler...');
         var messageObj;
         try {
             messageObj = JSON.parse(data);
@@ -49,17 +48,21 @@
                 _debug_1._console.error("Error (not sent) on treat of type(" + messageObj.type + ") : ", e);
             }
         }
+        _debug_1._console.log("\n");
         return secureHash;
     };
     function regInstantiable(object, excludeCalls, objectName) {
         if (objectName === void 0) { objectName = undefined; }
         _debug_1._console.assert(typeof object === 'function' && object, "Entity must be a not null function (" + object + " given)");
-        _callables[objectName ? objectName : object.name] = new CallableObject(object, "instantiable", excludeCalls);
+        var name = objectName ? objectName : object.name;
+        _debug_1._console.assert(typeof name === "string");
+        _callables[name] = new CallableObject(name, object, "instantiable", excludeCalls);
     }
     var CallableObject = (function () {
-        function CallableObject(object, type, excludeCalls) {
+        function CallableObject(name, object, type, excludeCalls) {
             if (excludeCalls === void 0) { excludeCalls = []; }
             this.structure = {};
+            this.name = name;
             this.type = type;
             this.object = object;
             this._excludeCalls = excludeCalls;
@@ -83,9 +86,11 @@
         };
         return CallableObject;
     }());
+    exports.CallableObject = CallableObject;
     function regFunction(func, funcName) {
         console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)');
-        _callables[funcName ? funcName : funcName.name] = new CallableObject(func, "function");
+        var name = funcName ? funcName : funcName.name;
+        _callables[name] = new CallableObject(name, func, "function");
     }
     var _checkSecureHash = function (callerSecureHash, instanceIdx) {
         if (_callerSecureHashes[callerSecureHash] === undefined) {
@@ -183,6 +188,8 @@
         _callerSecureHashes[callerSecureHash] = true;
         _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash);
         // At this point, caller must provide its secureHash
+        _debug_1._console.log("--> Send back :");
+        _debug_1._console.log(result);
         setTimeout(function () {
             _com.send(_myCalleeSecureHash, callerSecureHash, JSON.stringify({
                 "type": "farImportReturn",

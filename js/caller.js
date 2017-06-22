@@ -97,7 +97,6 @@
         _debug_1._console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise");
         backCreateInst.init.apply(backCreateInst, ret.initArgs)
             .then(function () {
-            _debug_1._console.log('PROMISE RETURNE');
             _promiseOkCbksH[callObj.rIdx](backCreateInst);
         });
     };
@@ -113,7 +112,7 @@
         _promiseOkCbksH[callObj.rIdx](instanceRpc); // complete the associated Promise
     };
     _treat.farImportReturn = function (callObj) {
-        _debug_1._console.log('treat.rImportReturn', callObj);
+        _debug_1._console.log('treat.farImportReturn', callObj);
         if (typeof callObj.rIdx !== "number") {
             throw {
                 "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -128,20 +127,23 @@
             };
         }
         var wrapObjects = _createWrappingObjects(callObj.objects);
-        _promiseOkCbksH[callObj.rIdx].apply(this, wrapObjects); // complete the associated Promise
+        _debug_1._console.log("--> Result of farImportReturn", wrapObjects);
+        _promiseOkCbksH[callObj.rIdx](wrapObjects); // complete the associated Promise
     };
     function _createWrappingObjects(objDescriptions) {
-        var wrappingObjects = [];
+        var wrappingObjects = {};
         objDescriptions.forEach(function (objDescription) {
-            _wrappingObjFactory[objDescription.type](objDescription);
+            wrappingObjects[objDescription.name] = _wrappingObjFactory[objDescription.type](objDescription);
         });
         return wrappingObjects;
     }
     var _wrappingObjFactory = {};
     _wrappingObjFactory['function'] = function (objDescription) {
         var func = function () {
-            return farCall(objDescription.name);
+            var args = Array.prototype.slice.call(arguments);
+            return farCall(objDescription.name, args);
         };
+        return func;
     };
     _wrappingObjFactory['instantiable'] = function (objDescription) {
         var factory = {};

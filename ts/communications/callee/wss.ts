@@ -72,7 +72,7 @@ export class WSS implements FACalleeCommunication {
       callerWSInfos.GUIDToSocket[messageObj.callerSecureHash] = ws
     }
     _console.assert(typeof this._calleeMessageHandlers[calleeSecureHash] === 'function', 'The collee Handler have not been initialysed')
-    _console.log(`Call message handler on callee : ${calleeSecureHash}`)
+    _console.log(` Targeted Callee : ${calleeSecureHash}\n`)
     this._calleeMessageHandlers[calleeSecureHash](messageObj.message)
   }
 

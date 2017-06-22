@@ -22,7 +22,7 @@ export class WS implements FACallerCommunication {
 
   private _messageHandler(event) {
     let data = JSON.parse(event.data)
-    console.log('--> Raw data', data);
+    //console.log('--> Raw data', data);
     this._clientMessageHandler(data)
   }
 
