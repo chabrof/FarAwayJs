@@ -64,7 +64,7 @@
                 callerWSInfos.GUIDToSocket[messageObj.callerSecureHash] = ws;
             }
             _debug_1._console.assert(typeof this._calleeMessageHandlers[calleeSecureHash] === 'function', 'The collee Handler have not been initialysed');
-            _debug_1._console.log("Call message handler on callee : " + calleeSecureHash);
+            _debug_1._console.log(" Targeted Callee : " + calleeSecureHash + "\n");
             this._calleeMessageHandlers[calleeSecureHash](messageObj.message);
         };
         WSS.prototype.registerCallerSecureHash = function (calleeSecureHash, callerGUID, callerSecureHash) {

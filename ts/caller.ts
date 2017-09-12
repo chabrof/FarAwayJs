@@ -1,8 +1,11 @@
-import { _console }               from "./_debug"
-import { FACallerCommunication, CallerBackCreate, CallerBCInitData }  from "./interfaces"
-import { debugOn }                from "./_debug"
-import { generateError }          from "./error"
+import {  _console }              from "./_debug"
+import {  debugOn }               from "./_debug"
+import {  generateError }         from "./error"
+import {  CallableObject }        from "./callee"
 import * as Chance                from "chance"
+import {  FACallerCommunication,
+          CallerBackCreate,
+          CallerBCInitData }      from "./interfaces"
 
 let _callables = {}
 let _rCallIdx = 0
@@ -97,7 +100,6 @@ _treat.farBackCreateReturn = function(callObj :any) {
   _console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise")
   backCreateInst.init.apply(backCreateInst, ret.initArgs)
     .then(() => {
-        _console.log('PROMISE RETURNE')
         _promiseOkCbksH[callObj.rIdx](backCreateInst)
       })
 }
@@ -116,7 +118,7 @@ _treat.farInstantiateReturn = function(callObj) {
 }
 
 _treat.farImportReturn = function(callObj) {
-  _console.log('treat.rImportReturn', callObj)
+  _console.log('treat.farImportReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
       "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
@@ -131,15 +133,16 @@ _treat.farImportReturn = function(callObj) {
     }
   }
   let wrapObjects = _createWrappingObjects(callObj.objects)
-  _promiseOkCbksH[callObj.rIdx].apply(this, wrapObjects) // complete the associated Promise
+  _console.log(`--> Result of farImportReturn`, wrapObjects)
+  _promiseOkCbksH[callObj.rIdx](wrapObjects) // complete the associated Promise
 }
 
-function _createWrappingObjects(objDescriptions :any[]) :any[] {
-  let wrappingObjects = []
+function _createWrappingObjects(objDescriptions :any[]) :any {
+  let wrappingObjects = {}
 
   objDescriptions.forEach(
     (objDescription) => {
-      _wrappingObjFactory[objDescription.type](objDescription)
+      wrappingObjects[objDescription.name] = _wrappingObjFactory[objDescription.type](objDescription)
     } )
   return wrappingObjects
 }
@@ -148,8 +151,10 @@ let _wrappingObjFactory = {}
 
 _wrappingObjFactory['function'] = function(objDescription) {
   let func = function() {
-    return farCall(objDescription.name)
+    let args :any[] = Array.prototype.slice.call(arguments)
+    return farCall(objDescription.name, args)
   }
+  return func
 }
 
 _wrappingObjFactory['instantiable'] = function(objDescription) {
@@ -230,7 +235,7 @@ function farImport(objNames :string[]) :any {
 
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
-  let chance = new Chance()
+  let chance = new (Chance as any)()
   _myCallerGUID = chance.guid()
   _comReadyPromise.then(
     function() {

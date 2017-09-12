@@ -9,9 +9,9 @@ let _callables = {}
 let _rCallIdx = 0
 let _com :FACalleeCommunication, _comReadyPromise :Promise<void>
 let _instancesH = {}
-let _magicToken = new Chance().guid()
+let _magicToken = new (Chance as any)().guid()
 let _callerSecureHashes = {}
-let _myCalleeSecureHash = generateSecureHash(_magicToken, new Chance().guid())
+let _myCalleeSecureHash = generateSecureHash(_magicToken, new (Chance as any)().guid())
 
 let setCommunication = function(communication :FACalleeCommunication) :Promise<any> {
   _com = communication
@@ -21,7 +21,6 @@ let setCommunication = function(communication :FACalleeCommunication) :Promise<a
 }
 
 let _messageCbk = function(data :string) {
-  _console.log('Caller message handler...')
   let messageObj :any
   try {
     messageObj = JSON.parse(data)
@@ -42,23 +41,27 @@ let _messageCbk = function(data :string) {
       _console.error(`Error (not sent) on treat of type(${messageObj.type}) : `, e)
     }
   }
+  _console.log(`\n`)
   return secureHash
 }
 
 function regInstantiable(object :any, excludeCalls :string[], objectName :string = undefined) {
   _console.assert(typeof object === 'function' && object, `Entity must be a not null function (${object} given)`)
-
-  _callables[objectName ? objectName : object.name] = new CallableObject(object, "instantiable", excludeCalls)
+  let name = objectName ? objectName : object.name
+  _console.assert(typeof name === "string")
+  _callables[name] = new CallableObject(name, object, "instantiable", excludeCalls)
 }
 
-class CallableObject {
+export class CallableObject {
 
+  public name :string
   public structure :any = {}
   public object   :any
   public type     :string
   private _excludeCalls :string[]
 
-  constructor(object :any, type :string, excludeCalls :string[] = []) {
+  constructor(name :string, object :any, type :string, excludeCalls :string[] = []) {
+    this.name = name
     this.type = type
     this.object = object
     this._excludeCalls = excludeCalls
@@ -86,8 +89,8 @@ class CallableObject {
 
 function regFunction (func :any, funcName) {
   console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)')
-
-  _callables[funcName ? funcName : funcName.name] = new CallableObject(func, "function")
+  let name = funcName ? funcName : funcName.name
+  _callables[name] = new CallableObject(name, func, "function")
 }
 
 let _checkSecureHash = function(callerSecureHash :string, instanceIdx? :number) : boolean {
@@ -148,7 +151,6 @@ _treat.farCall = function(callObj) {
   let ret = obj()
 
   if (ret.getBCInitDataForCaller) {
-
     _sendBackCreateReturn(callObj, ret)
     return
   }
@@ -181,7 +183,8 @@ _treat.farImport = function(callObj) {
       }
   }
   let result :any[] = []
-  callObj.symbols.forEach((symbol :string) => {
+  callObj.symbols.forEach(
+    (symbol :string) => {
       if (! _callables[symbol]) {
         throw {
             "message"         : `Symbol '${symbol}' does not exist in callee`,
@@ -200,6 +203,8 @@ _treat.farImport = function(callObj) {
 
   _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash)
   // At this point, caller must provide its secureHash
+  _console.log(`--> Send back :`)
+  _console.log(result)
   setTimeout(() => {
       _com.send(_myCalleeSecureHash,
                 callerSecureHash,
