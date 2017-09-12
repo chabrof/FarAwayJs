@@ -25,7 +25,7 @@ export class SimpleStream implements CalleeBackCreate {
 
    if (! callObj.callerGUID) {
       throw {
-          "message"           : "GUID must be provided",
+          "message"           : "callerGUID must be provided",
           "callerSecureHash"  : null
         }
     }

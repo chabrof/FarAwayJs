@@ -31,7 +31,7 @@
             _debug_1._console.assert(this._com, 'communication must be set before calling this function');
             if (!callObj.callerGUID) {
                 throw {
-                    "message": "GUID must be provided",
+                    "message": "callerGUID must be provided",
                     "callerSecureHash": null
                 };
             }
