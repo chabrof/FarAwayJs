@@ -1,12 +1,13 @@
 # Summary
 
-## Test
+## What is it ?
 
 * [Read Me](README.md)
-* [Introduction](introduction.md)
+* [Introduction](docs/introduction.md)
 * [Motivation](docs/motivation.md)
-* [Installation](docs/installation.md)
 * [What about a REST API ?](what-about-a-rest-api.md)
 
-## Basics
+## Getting Started
+
+* [Installation](docs/installation.md)
 
