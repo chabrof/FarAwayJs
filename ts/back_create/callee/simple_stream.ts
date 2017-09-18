@@ -5,17 +5,13 @@ import { _console } from "../../_debug"
 
 export class SimpleStream implements CalleeBackCreate {
 
-  private _hostForCaller :string
-  private _portForCaller :string
   private _com :FACalleeCommunication
   private _magicToken = new Chance().guid()
   private _mySecureHash :string = generateSecureHash(this._magicToken, new Chance().guid())
   private _treat :any = {}
   private _callerSecureHashes = {}
 
-  constructor (hostForCaller :string = "localhost", portForCaller :string = "8081") {
-    this._hostForCaller = hostForCaller
-    this._portForCaller = portForCaller
+  constructor () {
     this._treat.farHandShake = ((callObj) => this._treatFarHandShake(callObj))
   }
 
@@ -82,7 +78,7 @@ export class SimpleStream implements CalleeBackCreate {
   public getBCInitDataForCaller() :CallerBCInitData {
     return {
       constructorName : "SimpleStream",
-      constructorArgs : [ this._hostForCaller, this._portForCaller, this._mySecureHash ],
+      constructorArgs : [ this._com.host, this._com.port, this._mySecureHash ],
       initArgs : []
     }
   }

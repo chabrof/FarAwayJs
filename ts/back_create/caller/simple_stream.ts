@@ -18,7 +18,7 @@ export class SimpleStream implements CallerBackCreate {
     _console.assert(host && host.length, 'host must be a non null string')
     _console.assert(port && port.length, 'port must be a non null string')
     _console.assert(calleeSecureHash && calleeSecureHash.length, 'calleeSecureHash must be a non null string')
-    _console.log('host' + host, "port" + port)
+
     this._host = host
     this._port = port
     this._listeners = []
@@ -27,7 +27,7 @@ export class SimpleStream implements CallerBackCreate {
     this._treat.farHandShakeReturn = (data) => this._treatFarHandShakeReturn(data);
   }
 
-  public init() :Promise<void> {
+  public init() :Promise<any> {
     _console.assert(this._ws === undefined, "You have already init the WebSocket listening")
 
     let wsServer = `ws://${this._host}:${this._port}`

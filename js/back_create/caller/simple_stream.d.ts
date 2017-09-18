@@ -11,7 +11,7 @@ export declare class SimpleStream implements CallerBackCreate {
     private _myCallerGUID;
     private _calleeSecureHash;
     constructor(host: string, port: string, calleeSecureHash: string);
-    init(): Promise<void>;
+    init(): Promise<any>;
     private _farHandShake();
     private _treatFarHandShakeReturn(callObj);
     private _messageHandler(event);

@@ -13,16 +13,12 @@
     var secure_hash_1 = require("../../secure_hash");
     var _debug_1 = require("../../_debug");
     var SimpleStream = (function () {
-        function SimpleStream(hostForCaller, portForCaller) {
-            if (hostForCaller === void 0) { hostForCaller = "localhost"; }
-            if (portForCaller === void 0) { portForCaller = "8081"; }
+        function SimpleStream() {
             var _this = this;
             this._magicToken = new Chance().guid();
             this._mySecureHash = secure_hash_1.generateSecureHash(this._magicToken, new Chance().guid());
             this._treat = {};
             this._callerSecureHashes = {};
-            this._hostForCaller = hostForCaller;
-            this._portForCaller = portForCaller;
             this._treat.farHandShake = (function (callObj) { return _this._treatFarHandShake(callObj); });
         }
         SimpleStream.prototype._treatFarHandShake = function (callObj) {
@@ -81,7 +77,7 @@
         SimpleStream.prototype.getBCInitDataForCaller = function () {
             return {
                 constructorName: "SimpleStream",
-                constructorArgs: [this._hostForCaller, this._portForCaller, this._mySecureHash],
+                constructorArgs: [this._com.host, this._com.port, this._mySecureHash],
                 initArgs: []
             };
         };

@@ -8,6 +8,8 @@ export declare class WSS implements FACalleeCommunication {
     private _wsTab;
     private _callersWSInfo;
     constructor(host?: string, port?: string, options?: any);
+    readonly host: string;
+    readonly port: string;
     onMessage(calleeSecureHash: string, handler: (data: string) => string, mainClient?: boolean): void;
     initListening(): Promise<void>;
     private _treatIncomingMessage(ws, message);

@@ -39,7 +39,6 @@
             _debug_1._console.assert(host && host.length, 'host must be a non null string');
             _debug_1._console.assert(port && port.length, 'port must be a non null string');
             _debug_1._console.assert(calleeSecureHash && calleeSecureHash.length, 'calleeSecureHash must be a non null string');
-            _debug_1._console.log('host' + host, "port" + port);
             this._host = host;
             this._port = port;
             this._listeners = [];

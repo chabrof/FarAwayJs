@@ -23,6 +23,16 @@
             this._host = host;
             this._port = port;
         }
+        Object.defineProperty(WSS.prototype, "host", {
+            get: function () { return this._host; },
+            enumerable: true,
+            configurable: true
+        });
+        Object.defineProperty(WSS.prototype, "port", {
+            get: function () { return this._port; },
+            enumerable: true,
+            configurable: true
+        });
         WSS.prototype.onMessage = function (calleeSecureHash, handler, mainClient) {
             if (mainClient === void 0) { mainClient = false; }
             this._calleeMessageHandlers[calleeSecureHash] = handler;
