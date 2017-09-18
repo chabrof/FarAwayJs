@@ -1,4 +1,4 @@
-# ![](/docs/FarAwayJs.png)
+# 
 
 Make server calls while using simple local functions or objects.
 
