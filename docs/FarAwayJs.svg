@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="352"
+   height="64"
+   viewBox="0 0 352 64.000001"
+   id="svg5763"
+   version="1.1"
+   inkscape:version="0.91 r13725"
+   sodipodi:docname="FarAwayJs.svg"
+   inkscape:export-filename="C:\Users\Francois\Google Drive\FarAwayJs\FarAwayJs.png"
+   inkscape:export-xdpi="90"
+   inkscape:export-ydpi="90">
+  <defs
+     id="defs5765">
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient5602">
+      <stop
+         style="stop-color:#00c2f1;stop-opacity:1;"
+         offset="0"
+         id="stop5604" />
+      <stop
+         style="stop-color:#00c2f1;stop-opacity:0;"
+         offset="1"
+         id="stop5606" />
+    </linearGradient>
+    <filter
+       inkscape:collect="always"
+       style="color-interpolation-filters:sRGB"
+       id="filter5744"
+       x="-0.014448243"
+       width="1.0288965"
+       y="-0.0099669108"
+       height="1.0199338">
+      <feGaussianBlur
+         inkscape:collect="always"
+         stdDeviation="0.80207365"
+         id="feGaussianBlur5746" />
+    </filter>
+    <filter
+       inkscape:collect="always"
+       style="color-interpolation-filters:sRGB"
+       id="filter4278"
+       x="-0.011893993"
+       width="1.023788"
+       y="-0.012107913"
+       height="1.0242158">
+      <feGaussianBlur
+         inkscape:collect="always"
+         stdDeviation="1.416739"
+         id="feGaussianBlur4280" />
+    </filter>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient5602"
+       id="linearGradient5610"
+       x1="304.39709"
+       y1="905.0459"
+       x2="452.95508"
+       y2="905.80353"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="translate(-52.022856,46.719555)" />
+  </defs>
+  <sodipodi:namedview
+     id="base"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageopacity="0.0"
+     inkscape:pageshadow="2"
+     inkscape:zoom="1.979899"
+     inkscape:cx="279.39316"
+     inkscape:cy="-2.340603"
+     inkscape:document-units="px"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     units="px"
+     fit-margin-top="0"
+     fit-margin-left="0"
+     fit-margin-right="0"
+     fit-margin-bottom="0"
+     inkscape:window-width="1920"
+     inkscape:window-height="1017"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1" />
+  <metadata
+     id="metadata5768">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     inkscape:label="Calque 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-6.984701,-912.12321)">
+    <ellipse
+       style="fill:#fff584;fill-opacity:1;fill-rule:evenodd;stroke:#00c2f1;stroke-width:19.40050316;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;filter:url(#filter4278)"
+       id="path3336"
+       cx="238.90108"
+       cy="444.25037"
+       rx="142.93658"
+       ry="140.41121"
+       transform="matrix(0.38094111,0.11474522,-0.17208174,0.16184778,58.270623,845.32875)" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:195.26063538px;line-height:125%;font-family:'Trebuchet MS';-inkscape-font-specification:'Trebuchet MS';letter-spacing:0px;word-spacing:0px;fill:#00c2f1;fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;filter:url(#filter5744)"
+       x="294.82516"
+       y="434.91287"
+       id="text5740"
+       sodipodi:linespacing="125%"
+       transform="matrix(0.48962309,0.14545509,-0.18905393,0.17536702,-35.240418,828.51965)"><tspan
+         sodipodi:role="line"
+         id="tspan5742"
+         x="294.82516"
+         y="434.91287">H</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-weight:normal;font-size:40px;line-height:125%;font-family:sans-serif;letter-spacing:0px;word-spacing:0px;fill:url(#linearGradient5610);fill-opacity:1;stroke:none;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       x="147.43456"
+       y="962.02905"
+       id="text3340"
+       sodipodi:linespacing="125%"><tspan
+         sodipodi:role="line"
+         id="tspan3342"
+         x="147.43456"
+         y="962.02905"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-family:sans-serif;-inkscape-font-specification:'sans-serif Bold';letter-spacing:-2.45000005px;fill:url(#linearGradient5610);fill-opacity:1">FarAwayJs</tspan></text>
+  </g>
+</svg>
