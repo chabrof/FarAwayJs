@@ -6,13 +6,9 @@ FarAwayJs gives to browsers a very simple way to communicate with a nodeJs serve
 
 It's a kind of RPC for JS/TS objects using WebSockets \(or, later, HTTP standard calls\).
 
-
-
 [Introduction](/introduction.md)
 
 [Motivation](/docs/motivation.md "Motivation")
 
-
-
-
+[Installation](/docs/installation.md)
 
