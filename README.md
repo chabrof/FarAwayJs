@@ -1,6 +1,6 @@
-# FarAwayJs
+# ![](/docs/FarAwayJs.png)
 
-Make server calls while using simple local functions or objects. 
+Make server calls while using simple local functions or objects.
 
 FarAwayJs gives to browsers a very simple way to communicate with a nodeJs server.
 
