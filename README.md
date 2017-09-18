@@ -1,8 +1,7 @@
 # ![](/docs/FarAwayJs.png)
 
-With FarAwayJs,  you can easily make NodeJs server distant calls : 
-
-  you use simple local functions or objects, which return Promises.
+With FarAwayJs,  you can easily make NodeJs server distant calls :  
+you use simple local functions or objects, which return Promises.
 
 FarAwayJs gives to browsers a very simple way to communicate with a NodeJs server.
 
