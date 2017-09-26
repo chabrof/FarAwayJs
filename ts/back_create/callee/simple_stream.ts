@@ -1,13 +1,13 @@
 import { CalleeBackCreate, CallerBCInitData, FACalleeCommunication } from "../../interfaces"
-import * as Chance from "chance"
+import { Chance } from "chance"
 import { generateSecureHash } from "../../secure_hash"
 import { _console } from "../../_debug"
 
 export class SimpleStream implements CalleeBackCreate {
 
   private _com :FACalleeCommunication
-  private _magicToken = new Chance().guid()
-  private _mySecureHash :string = generateSecureHash(this._magicToken, new Chance().guid())
+  private _magicToken = new Chance.Chance().guid()
+  private _mySecureHash :string = generateSecureHash(this._magicToken, new Chance.Chance().guid())
   private _treat :any = {}
   private _callerSecureHashes = {}
 

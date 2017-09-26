@@ -2,7 +2,7 @@ import {  _console }              from "./_debug"
 import {  debugOn }               from "./_debug"
 import {  generateError }         from "./error"
 import {  CallableObject }        from "./callee"
-import * as Chance                from "chance"
+import { Chance }                 from "chance"
 import {  FACallerCommunication,
           CallerBackCreate,
           CallerBCInitData }      from "./interfaces"
@@ -235,7 +235,7 @@ function farImport(objNames :string[]) :any {
 
   let idx = _getRCallIdx()
   let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
-  let chance = new (Chance as any)()
+  let chance = new (Chance.Chance as any)()
   _myCallerGUID = chance.guid()
   _comReadyPromise.then(
     function() {

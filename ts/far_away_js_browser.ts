@@ -1,0 +1,11 @@
+import { farAwayCaller as caller } from "./caller"
+import { CallerBackCreate, FACallerCommunication } from "./interfaces"
+import { SimpleStream as CallerSimpleStream } from "./back_create/caller/simple_stream"
+import { WS as CallerWS } from "./communications/caller/ws"
+
+export { caller, CallerSimpleStream, CallerWS }
+let FarAwayJs =  { caller, CallerSimpleStream, CallerWS }
+
+// define some global for Vanilla Js using only on browser side
+if (typeof window !== 'undefined')
+  (window as any).FarAwayJs = FarAwayJs

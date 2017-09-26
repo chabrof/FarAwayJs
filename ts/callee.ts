@@ -2,16 +2,16 @@ import { _console } from "./_debug"
 import { debugOn } from "./_debug"
 import { FACalleeCommunication, TupleInstanceSecureHash } from "./interfaces"
 import { generateError } from "./error"
-import * as Chance from "chance"
+import {Chance} from "chance"
 import { generateSecureHash } from "./secure_hash"
 
 let _callables = {}
 let _rCallIdx = 0
 let _com :FACalleeCommunication, _comReadyPromise :Promise<void>
 let _instancesH = {}
-let _magicToken = new (Chance as any)().guid()
+let _magicToken = new (Chance.Chance as any)().guid()
 let _callerSecureHashes = {}
-let _myCalleeSecureHash = generateSecureHash(_magicToken, new (Chance as any)().guid())
+let _myCalleeSecureHash = generateSecureHash(_magicToken, new (Chance.Chance as any)().guid())
 
 let setCommunication = function(communication :FACalleeCommunication) :Promise<any> {
   _com = communication

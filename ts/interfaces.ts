@@ -1,9 +1,8 @@
-
 export interface FASending {
   send :(calleeSecureHash :string, callerSecureHash :string, message :string) => void
 }
 
-export interface FACallerCommunication extends FASending   {
+export interface FACallerCommunication extends FASending    {
 
   initListening :() => Promise<void>
   onMessage :(handler :(data :string) => void) => void
@@ -19,7 +18,6 @@ export interface FACalleeCommunication extends FASending  {
 }
 
 export interface TupleInstanceSecureHash {
-
   secureHash :string
   instance :any
 }

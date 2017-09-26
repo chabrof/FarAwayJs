@@ -1,6 +1,6 @@
 import { _console } from "../../_debug"
 import { CallerBackCreate } from "../../interfaces"
-import * as Chance from "chance"
+import { Chance } from "chance"
 
 export class SimpleStream implements CallerBackCreate {
   private _ws :WebSocket
@@ -11,7 +11,7 @@ export class SimpleStream implements CallerBackCreate {
   private _treat :any  = {}
   private _mySecureHash :string
   private _handShakeOkPromise :() => void
-  private _myCallerGUID :string = new Chance().guid()
+  private _myCallerGUID :string = new Chance.Chance().guid()
   private _calleeSecureHash :string
 
   constructor (host :string = "localhost", port :string = "8080", calleeSecureHash :string) {
