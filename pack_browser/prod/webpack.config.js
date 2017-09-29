@@ -1,11 +1,12 @@
-const UglifyJSPlugin = require('uglifyjs-webpack-plugin')
+const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
 
 module.exports = {
-  entry: '../js/far_away_js_browser.js',
+  entry: '../../js/far_away_js_browser.js',
   output: {
-    filename: '../dist/FAJ_browser.js',
+    filename: '../../dist/FAJ_browser_min.js',
     libraryTarget: "umd"
   },
+  devtool: "source-map",
   module: {
     loaders: [{
         test: /\.js$/,
@@ -19,6 +20,7 @@ module.exports = {
   },
   plugins: [
     new UglifyJSPlugin({
+      sourceMap: true
     })
   ]
 };

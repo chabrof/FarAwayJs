@@ -29,8 +29,17 @@
     "babel-preset-env": "latest"
   },
   "scripts": {
-    "packBrowser": "cd pack_browser && pwd && \"../node_modules/.bin/webpack\"",
-    "packNode": "cd ./pack_node && pwd && \"../node_modules/.bin/webpack\""
+    "build:dev": "npm run build:dev:browser && npm run build:dev:node",
+    "build:dev:browser": "cd \"pack_browser/dev\" && pwd && \"../../node_modules/.bin/webpack\"",
+    "build:browser:dev": "npm run build:dev:browser",
+    "build:dev:node": "cd \"pack_node/dev\" && pwd && \"../../node_modules/.bin/webpack\"",
+    "build:node:dev" : "npm run build:dev:node",
+
+    "build:prod": "npm run build:prod:browser && npm run build:prod:node",
+    "build:prod:browser": "cd \"pack_browser/prod\" && pwd && \"../../node_modules/.bin/webpack\"",
+    "build:browser:prod" : "npm run build:prod:browser",
+    "build:prod:node": "cd \"pack_node/prod\" && pwd && \"../../node_modules/.bin/webpack\"",
+    "build:node:prod" : "npm run build:prod:node"
   },
   "readme": "#FarAwayJs"
 }

@@ -1,10 +1,11 @@
 module.exports = {
-  entry: '../js/far_away_js.js',
+  entry: '../../js/far_away_js_node.js',
   output: {
-    filename: '../dist/FAJ_node.js',
+    filename: '../../dist/FAJ_node.js',
     libraryTarget: "commonjs2"
   },
   target: 'node',
+  devtool: "source-map",
   module: {
     loaders: [{
         test: /\.js$/,
