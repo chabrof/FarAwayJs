@@ -1,0 +1,61 @@
+<html>
+<script src="../dist/FAJ_browser.js"></script>
+<script>
+
+function main() {
+  var caller = FarAwayJs.caller
+  var SimpleStream = FarAwayJs.CallerSimpleStream
+
+  // Activate console logs
+  caller.debugOn()
+  let wsCommunication = new FarAwayJs.CallerWS('localhost', '8080')
+  caller.setCommunication(wsCommunication)
+  caller.regBackCreateObject("SimpleStream", SimpleStream)
+
+  caller.farImport(["test", "MyClass"])
+    .then(
+      ({ test, MyClass }) => {
+
+        console.log('Arguments', arguments, test);
+        //caller.farCall("test", ['argu1', 'argu2'])
+        test('argu1', 'argu2')
+          .then((result) => { console.log('Test method Result : ', result); return new Promise((ok) => ok()) })
+          .then(() => nextStep(MyClass))
+      })
+}
+
+// In the next step, we try to instantiate remotely a tiny object, and to use its method
+function nextStep(MyClass) {
+
+  let instance = new MyClass('argConstruct1', 'argConstruct2')
+  instance.foo('arg1 of foo', 'arg2 of foo').then((result) => console.log(result))
+  // in parallel get another stream
+  instance.getAnotherPreciousStream().then((stream) => listenToStream(stream))
+/*
+  FarAwayJs.caller.farInstantiate("MyClass", ['argConstruct1', 'argConstruct2'])
+    .then((myClass) => {
+        console.log('Try to call methods of a freshly instantiated object');
+
+        myClass.farCall("foo", ['arg1', 'arg2'])
+          .then(function(result) { console.log('Result of method call', result) })
+          .then(function() { return myClass.farCall("getAPreciousStream") })
+          .then(function(stream)  { console.log('Stream', stream); return stream })
+          .then(function(stream) { listenToStream(stream) });
+
+        // In parallel get another stream
+        myClass.farCall("getAnotherPreciousStream")
+          .then(function(stream) { listenToStream(stream) })
+      })*/
+}
+
+function listenToStream(stream) {
+
+  function listener(message) {
+    console.log('Message from stream', message);
+  }
+
+  stream.addEventListener(listener);
+}
+
+main();
+</script>

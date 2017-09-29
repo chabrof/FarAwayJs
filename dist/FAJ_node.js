@@ -61,36 +61,15 @@ module.exports =
 /******/ 	__webpack_require__.p = "";
 /******/
 /******/ 	// Load entry module and return exports
-/******/ 	return __webpack_require__(__webpack_require__.s = 18);
+/******/ 	return __webpack_require__(__webpack_require__.s = 17);
 /******/ })
 /************************************************************************/
 /******/ ([
 /* 0 */
 /***/ (function(module, exports, __webpack_require__) {
 
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports._console = undefined;
-exports.debugOn = debugOn;
-
-var _console2 = __webpack_require__(20);
-
-var _console = exports._console = _console2.nullConsole;
-function debugOn(prConsole) {
-    exports._console = _console = prConsole ? prConsole : console;
-}
-//# sourceMappingURL=_debug.js.map
-
-/***/ }),
-/* 1 */
-/***/ (function(module, exports, __webpack_require__) {
-
 /* eslint-disable node/no-deprecated-api */
-var buffer = __webpack_require__(29)
+var buffer = __webpack_require__(26)
 var Buffer = buffer.Buffer
 
 // alternative to using Object.keys for old browsers
@@ -154,7 +133,575 @@ SafeBuffer.allocUnsafeSlow = function (size) {
 
 
 /***/ }),
+/* 1 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports._console = undefined;
+exports.debugOn = debugOn;
+
+var _console2 = __webpack_require__(19);
+
+var _console = exports._console = _console2.nullConsole;
+function debugOn(prConsole) {
+    exports._console = _console = prConsole ? prConsole : console;
+}
+
+/***/ }),
 /* 2 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+const safeBuffer = __webpack_require__(0);
+const zlib = __webpack_require__(27);
+const Limiter = __webpack_require__(28);
+
+const bufferUtil = __webpack_require__(4);
+
+const Buffer = safeBuffer.Buffer;
+
+const TRAILER = Buffer.from([0x00, 0x00, 0xff, 0xff]);
+const EMPTY_BLOCK = Buffer.from([0x00]);
+
+// We limit zlib concurrency, which prevents severe memory fragmentation
+// as documented in https://github.com/nodejs/node/issues/8871#issuecomment-250915913
+// and https://github.com/websockets/ws/issues/1202
+//
+// Intentionally global; it's the global thread pool that's
+// an issue.
+let zlibLimiter;
+
+/**
+ * Per-message Deflate implementation.
+ */
+class PerMessageDeflate {
+  constructor (options, isServer, maxPayload) {
+    this._maxPayload = maxPayload | 0;
+    this._options = options || {};
+    this._threshold = this._options.threshold !== undefined
+      ? this._options.threshold
+      : 1024;
+    this._isServer = !!isServer;
+    this._deflate = null;
+    this._inflate = null;
+
+    this.params = null;
+
+    if (!zlibLimiter) {
+      const concurrency = this._options.concurrencyLimit !== undefined
+        ? this._options.concurrencyLimit
+        : 10;
+      zlibLimiter = new Limiter({ concurrency });
+    }
+  }
+
+  static get extensionName () {
+    return 'permessage-deflate';
+  }
+
+  /**
+   * Create extension parameters offer.
+   *
+   * @return {Object} Extension parameters
+   * @public
+   */
+  offer () {
+    const params = {};
+
+    if (this._options.serverNoContextTakeover) {
+      params.server_no_context_takeover = true;
+    }
+    if (this._options.clientNoContextTakeover) {
+      params.client_no_context_takeover = true;
+    }
+    if (this._options.serverMaxWindowBits) {
+      params.server_max_window_bits = this._options.serverMaxWindowBits;
+    }
+    if (this._options.clientMaxWindowBits) {
+      params.client_max_window_bits = this._options.clientMaxWindowBits;
+    } else if (this._options.clientMaxWindowBits == null) {
+      params.client_max_window_bits = true;
+    }
+
+    return params;
+  }
+
+  /**
+   * Accept extension offer.
+   *
+   * @param {Array} paramsList Extension parameters
+   * @return {Object} Accepted configuration
+   * @public
+   */
+  accept (paramsList) {
+    paramsList = this.normalizeParams(paramsList);
+
+    var params;
+    if (this._isServer) {
+      params = this.acceptAsServer(paramsList);
+    } else {
+      params = this.acceptAsClient(paramsList);
+    }
+
+    this.params = params;
+    return params;
+  }
+
+  /**
+   * Releases all resources used by the extension.
+   *
+   * @public
+   */
+  cleanup () {
+    if (this._inflate) {
+      if (this._inflate.writeInProgress) {
+        this._inflate.pendingClose = true;
+      } else {
+        this._inflate.close();
+        this._inflate = null;
+      }
+    }
+    if (this._deflate) {
+      if (this._deflate.writeInProgress) {
+        this._deflate.pendingClose = true;
+      } else {
+        this._deflate.close();
+        this._deflate = null;
+      }
+    }
+  }
+
+  /**
+   * Accept extension offer from client.
+   *
+   * @param {Array} paramsList Extension parameters
+   * @return {Object} Accepted configuration
+   * @private
+   */
+  acceptAsServer (paramsList) {
+    const accepted = {};
+    const result = paramsList.some((params) => {
+      if (
+        (this._options.serverNoContextTakeover === false &&
+          params.server_no_context_takeover) ||
+        (this._options.serverMaxWindowBits === false &&
+          params.server_max_window_bits) ||
+        (typeof this._options.serverMaxWindowBits === 'number' &&
+          typeof params.server_max_window_bits === 'number' &&
+          this._options.serverMaxWindowBits > params.server_max_window_bits) ||
+        (typeof this._options.clientMaxWindowBits === 'number' &&
+          !params.client_max_window_bits)
+      ) {
+        return;
+      }
+
+      if (
+        this._options.serverNoContextTakeover ||
+        params.server_no_context_takeover
+      ) {
+        accepted.server_no_context_takeover = true;
+      }
+      if (
+        this._options.clientNoContextTakeover ||
+        (this._options.clientNoContextTakeover !== false &&
+          params.client_no_context_takeover)
+      ) {
+        accepted.client_no_context_takeover = true;
+      }
+      if (typeof this._options.serverMaxWindowBits === 'number') {
+        accepted.server_max_window_bits = this._options.serverMaxWindowBits;
+      } else if (typeof params.server_max_window_bits === 'number') {
+        accepted.server_max_window_bits = params.server_max_window_bits;
+      }
+      if (typeof this._options.clientMaxWindowBits === 'number') {
+        accepted.client_max_window_bits = this._options.clientMaxWindowBits;
+      } else if (
+        this._options.clientMaxWindowBits !== false &&
+        typeof params.client_max_window_bits === 'number'
+      ) {
+        accepted.client_max_window_bits = params.client_max_window_bits;
+      }
+      return true;
+    });
+
+    if (!result) throw new Error("Doesn't support the offered configuration");
+
+    return accepted;
+  }
+
+  /**
+   * Accept extension response from server.
+   *
+   * @param {Array} paramsList Extension parameters
+   * @return {Object} Accepted configuration
+   * @private
+   */
+  acceptAsClient (paramsList) {
+    const params = paramsList[0];
+
+    if (this._options.clientNoContextTakeover != null) {
+      if (
+        this._options.clientNoContextTakeover === false &&
+        params.client_no_context_takeover
+      ) {
+        throw new Error('Invalid value for "client_no_context_takeover"');
+      }
+    }
+    if (this._options.clientMaxWindowBits != null) {
+      if (
+        this._options.clientMaxWindowBits === false &&
+        params.client_max_window_bits
+      ) {
+        throw new Error('Invalid value for "client_max_window_bits"');
+      }
+      if (
+        typeof this._options.clientMaxWindowBits === 'number' &&
+        (!params.client_max_window_bits ||
+          params.client_max_window_bits > this._options.clientMaxWindowBits)
+      ) {
+        throw new Error('Invalid value for "client_max_window_bits"');
+      }
+    }
+
+    return params;
+  }
+
+  /**
+   * Normalize extensions parameters.
+   *
+   * @param {Array} paramsList Extension parameters
+   * @return {Array} Normalized extensions parameters
+   * @private
+   */
+  normalizeParams (paramsList) {
+    return paramsList.map((params) => {
+      Object.keys(params).forEach((key) => {
+        var value = params[key];
+        if (value.length > 1) {
+          throw new Error(`Multiple extension parameters for ${key}`);
+        }
+
+        value = value[0];
+
+        switch (key) {
+          case 'server_no_context_takeover':
+          case 'client_no_context_takeover':
+            if (value !== true) {
+              throw new Error(`invalid extension parameter value for ${key} (${value})`);
+            }
+            params[key] = true;
+            break;
+          case 'server_max_window_bits':
+          case 'client_max_window_bits':
+            if (typeof value === 'string') {
+              value = parseInt(value, 10);
+              if (
+                Number.isNaN(value) ||
+                value < zlib.Z_MIN_WINDOWBITS ||
+                value > zlib.Z_MAX_WINDOWBITS
+              ) {
+                throw new Error(`invalid extension parameter value for ${key} (${value})`);
+              }
+            }
+            if (!this._isServer && value === true) {
+              throw new Error(`Missing extension parameter value for ${key}`);
+            }
+            params[key] = value;
+            break;
+          default:
+            throw new Error(`Not defined extension parameter (${key})`);
+        }
+      });
+      return params;
+    });
+  }
+
+  /**
+   * Decompress data. Concurrency limited by async-limiter.
+   *
+   * @param {Buffer} data Compressed data
+   * @param {Boolean} fin Specifies whether or not this is the last fragment
+   * @param {Function} callback Callback
+   * @public
+   */
+  decompress (data, fin, callback) {
+    zlibLimiter.push((done) => {
+      this._decompress(data, fin, (err, result) => {
+        done();
+        callback(err, result);
+      });
+    });
+  }
+
+  /**
+   * Compress data. Concurrency limited by async-limiter.
+   *
+   * @param {Buffer} data Data to compress
+   * @param {Boolean} fin Specifies whether or not this is the last fragment
+   * @param {Function} callback Callback
+   * @public
+   */
+  compress (data, fin, callback) {
+    zlibLimiter.push((done) => {
+      this._compress(data, fin, (err, result) => {
+        done();
+        callback(err, result);
+      });
+    });
+  }
+
+  /**
+   * Decompress data.
+   *
+   * @param {Buffer} data Compressed data
+   * @param {Boolean} fin Specifies whether or not this is the last fragment
+   * @param {Function} callback Callback
+   * @private
+   */
+  _decompress (data, fin, callback) {
+    const endpoint = this._isServer ? 'client' : 'server';
+
+    if (!this._inflate) {
+      const key = `${endpoint}_max_window_bits`;
+      const windowBits = typeof this.params[key] !== 'number'
+        ? zlib.Z_DEFAULT_WINDOWBITS
+        : this.params[key];
+
+      this._inflate = zlib.createInflateRaw({ windowBits });
+    }
+    this._inflate.writeInProgress = true;
+
+    var totalLength = 0;
+    const buffers = [];
+    var err;
+
+    const onData = (data) => {
+      totalLength += data.length;
+      if (this._maxPayload < 1 || totalLength <= this._maxPayload) {
+        return buffers.push(data);
+      }
+
+      err = new Error('max payload size exceeded');
+      err.closeCode = 1009;
+      this._inflate.reset();
+    };
+
+    const onError = (err) => {
+      cleanup();
+      callback(err);
+    };
+
+    const cleanup = () => {
+      if (!this._inflate) return;
+
+      this._inflate.removeListener('error', onError);
+      this._inflate.removeListener('data', onData);
+      this._inflate.writeInProgress = false;
+
+      if (
+        (fin && this.params[`${endpoint}_no_context_takeover`]) ||
+        this._inflate.pendingClose
+      ) {
+        this._inflate.close();
+        this._inflate = null;
+      }
+    };
+
+    this._inflate.on('error', onError).on('data', onData);
+    this._inflate.write(data);
+    if (fin) this._inflate.write(TRAILER);
+
+    this._inflate.flush(() => {
+      cleanup();
+      if (err) callback(err);
+      else callback(null, bufferUtil.concat(buffers, totalLength));
+    });
+  }
+
+  /**
+   * Compress data.
+   *
+   * @param {Buffer} data Data to compress
+   * @param {Boolean} fin Specifies whether or not this is the last fragment
+   * @param {Function} callback Callback
+   * @private
+   */
+  _compress (data, fin, callback) {
+    if (!data || data.length === 0) {
+      process.nextTick(callback, null, EMPTY_BLOCK);
+      return;
+    }
+
+    const endpoint = this._isServer ? 'server' : 'client';
+
+    if (!this._deflate) {
+      const key = `${endpoint}_max_window_bits`;
+      const windowBits = typeof this.params[key] !== 'number'
+        ? zlib.Z_DEFAULT_WINDOWBITS
+        : this.params[key];
+
+      this._deflate = zlib.createDeflateRaw({
+        memLevel: this._options.memLevel,
+        level: this._options.level,
+        flush: zlib.Z_SYNC_FLUSH,
+        windowBits
+      });
+    }
+    this._deflate.writeInProgress = true;
+
+    var totalLength = 0;
+    const buffers = [];
+
+    const onData = (data) => {
+      totalLength += data.length;
+      buffers.push(data);
+    };
+
+    const onError = (err) => {
+      cleanup();
+      callback(err);
+    };
+
+    const cleanup = () => {
+      if (!this._deflate) return;
+
+      this._deflate.removeListener('error', onError);
+      this._deflate.removeListener('data', onData);
+      this._deflate.writeInProgress = false;
+
+      if (
+        (fin && this.params[`${endpoint}_no_context_takeover`]) ||
+        this._deflate.pendingClose
+      ) {
+        this._deflate.close();
+        this._deflate = null;
+      }
+    };
+
+    this._deflate.on('error', onError).on('data', onData);
+    this._deflate.write(data);
+    this._deflate.flush(zlib.Z_SYNC_FLUSH, () => {
+      cleanup();
+      var data = bufferUtil.concat(buffers, totalLength);
+      if (fin) data = data.slice(0, data.length - 4);
+      callback(null, data);
+    });
+  }
+}
+
+module.exports = PerMessageDeflate;
+
+
+/***/ }),
+/* 3 */
+/***/ (function(module, exports) {
+
+module.exports = require("crypto");
+
+/***/ }),
+/* 4 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+/*!
+ * ws: a node.js websocket client
+ * Copyright(c) 2011 Einar Otto Stangvik <einaros@gmail.com>
+ * MIT Licensed
+ */
+
+
+
+const safeBuffer = __webpack_require__(0);
+
+const Buffer = safeBuffer.Buffer;
+
+/**
+ * Merges an array of buffers into a new buffer.
+ *
+ * @param {Buffer[]} list The array of buffers to concat
+ * @param {Number} totalLength The total length of buffers in the list
+ * @return {Buffer} The resulting buffer
+ * @public
+ */
+const concat = (list, totalLength) => {
+  const target = Buffer.allocUnsafe(totalLength);
+  var offset = 0;
+
+  for (var i = 0; i < list.length; i++) {
+    const buf = list[i];
+    buf.copy(target, offset);
+    offset += buf.length;
+  }
+
+  return target;
+};
+
+try {
+  const bufferUtil = __webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module \"bufferutil\""); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
+
+  module.exports = Object.assign({ concat }, bufferUtil.BufferUtil || bufferUtil);
+} catch (e) /* istanbul ignore next */ {
+  /**
+   * Masks a buffer using the given mask.
+   *
+   * @param {Buffer} source The buffer to mask
+   * @param {Buffer} mask The mask to use
+   * @param {Buffer} output The buffer where to store the result
+   * @param {Number} offset The offset at which to start writing
+   * @param {Number} length The number of bytes to mask.
+   * @public
+   */
+  const mask = (source, mask, output, offset, length) => {
+    for (var i = 0; i < length; i++) {
+      output[offset + i] = source[i] ^ mask[i & 3];
+    }
+  };
+
+  /**
+   * Unmasks a buffer using the given mask.
+   *
+   * @param {Buffer} buffer The buffer to unmask
+   * @param {Buffer} mask The mask to use
+   * @public
+   */
+  const unmask = (buffer, mask) => {
+    // Required until https://github.com/nodejs/node/issues/9006 is resolved.
+    const length = buffer.length;
+    for (var i = 0; i < length; i++) {
+      buffer[i] ^= mask[i & 3];
+    }
+  };
+
+  module.exports = { concat, mask, unmask };
+}
+
+
+/***/ }),
+/* 5 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+const safeBuffer = __webpack_require__(0);
+
+const Buffer = safeBuffer.Buffer;
+
+exports.BINARY_TYPES = ['nodebuffer', 'arraybuffer', 'fragments'];
+exports.GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+exports.EMPTY_BUFFER = Buffer.alloc(0);
+exports.NOOP = () => {};
+
+
+/***/ }),
+/* 6 */
 /***/ (function(module, exports, __webpack_require__) {
 
 var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;//  Chance.js 1.0.11
@@ -7426,582 +7973,7 @@ var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;//  Chance.js 1.
 
 
 /***/ }),
-/* 3 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const safeBuffer = __webpack_require__(1);
-const zlib = __webpack_require__(30);
-const Limiter = __webpack_require__(31);
-
-const bufferUtil = __webpack_require__(5);
-
-const Buffer = safeBuffer.Buffer;
-
-const TRAILER = Buffer.from([0x00, 0x00, 0xff, 0xff]);
-const EMPTY_BLOCK = Buffer.from([0x00]);
-
-// We limit zlib concurrency, which prevents severe memory fragmentation
-// as documented in https://github.com/nodejs/node/issues/8871#issuecomment-250915913
-// and https://github.com/websockets/ws/issues/1202
-//
-// Intentionally global; it's the global thread pool that's
-// an issue.
-let zlibLimiter;
-
-/**
- * Per-message Deflate implementation.
- */
-class PerMessageDeflate {
-  constructor (options, isServer, maxPayload) {
-    this._maxPayload = maxPayload | 0;
-    this._options = options || {};
-    this._threshold = this._options.threshold !== undefined
-      ? this._options.threshold
-      : 1024;
-    this._isServer = !!isServer;
-    this._deflate = null;
-    this._inflate = null;
-
-    this.params = null;
-
-    if (!zlibLimiter) {
-      const concurrency = this._options.concurrencyLimit !== undefined
-        ? this._options.concurrencyLimit
-        : 10;
-      zlibLimiter = new Limiter({ concurrency });
-    }
-  }
-
-  static get extensionName () {
-    return 'permessage-deflate';
-  }
-
-  /**
-   * Create extension parameters offer.
-   *
-   * @return {Object} Extension parameters
-   * @public
-   */
-  offer () {
-    const params = {};
-
-    if (this._options.serverNoContextTakeover) {
-      params.server_no_context_takeover = true;
-    }
-    if (this._options.clientNoContextTakeover) {
-      params.client_no_context_takeover = true;
-    }
-    if (this._options.serverMaxWindowBits) {
-      params.server_max_window_bits = this._options.serverMaxWindowBits;
-    }
-    if (this._options.clientMaxWindowBits) {
-      params.client_max_window_bits = this._options.clientMaxWindowBits;
-    } else if (this._options.clientMaxWindowBits == null) {
-      params.client_max_window_bits = true;
-    }
-
-    return params;
-  }
-
-  /**
-   * Accept extension offer.
-   *
-   * @param {Array} paramsList Extension parameters
-   * @return {Object} Accepted configuration
-   * @public
-   */
-  accept (paramsList) {
-    paramsList = this.normalizeParams(paramsList);
-
-    var params;
-    if (this._isServer) {
-      params = this.acceptAsServer(paramsList);
-    } else {
-      params = this.acceptAsClient(paramsList);
-    }
-
-    this.params = params;
-    return params;
-  }
-
-  /**
-   * Releases all resources used by the extension.
-   *
-   * @public
-   */
-  cleanup () {
-    if (this._inflate) {
-      if (this._inflate.writeInProgress) {
-        this._inflate.pendingClose = true;
-      } else {
-        this._inflate.close();
-        this._inflate = null;
-      }
-    }
-    if (this._deflate) {
-      if (this._deflate.writeInProgress) {
-        this._deflate.pendingClose = true;
-      } else {
-        this._deflate.close();
-        this._deflate = null;
-      }
-    }
-  }
-
-  /**
-   * Accept extension offer from client.
-   *
-   * @param {Array} paramsList Extension parameters
-   * @return {Object} Accepted configuration
-   * @private
-   */
-  acceptAsServer (paramsList) {
-    const accepted = {};
-    const result = paramsList.some((params) => {
-      if (
-        (this._options.serverNoContextTakeover === false &&
-          params.server_no_context_takeover) ||
-        (this._options.serverMaxWindowBits === false &&
-          params.server_max_window_bits) ||
-        (typeof this._options.serverMaxWindowBits === 'number' &&
-          typeof params.server_max_window_bits === 'number' &&
-          this._options.serverMaxWindowBits > params.server_max_window_bits) ||
-        (typeof this._options.clientMaxWindowBits === 'number' &&
-          !params.client_max_window_bits)
-      ) {
-        return;
-      }
-
-      if (
-        this._options.serverNoContextTakeover ||
-        params.server_no_context_takeover
-      ) {
-        accepted.server_no_context_takeover = true;
-      }
-      if (
-        this._options.clientNoContextTakeover ||
-        (this._options.clientNoContextTakeover !== false &&
-          params.client_no_context_takeover)
-      ) {
-        accepted.client_no_context_takeover = true;
-      }
-      if (typeof this._options.serverMaxWindowBits === 'number') {
-        accepted.server_max_window_bits = this._options.serverMaxWindowBits;
-      } else if (typeof params.server_max_window_bits === 'number') {
-        accepted.server_max_window_bits = params.server_max_window_bits;
-      }
-      if (typeof this._options.clientMaxWindowBits === 'number') {
-        accepted.client_max_window_bits = this._options.clientMaxWindowBits;
-      } else if (
-        this._options.clientMaxWindowBits !== false &&
-        typeof params.client_max_window_bits === 'number'
-      ) {
-        accepted.client_max_window_bits = params.client_max_window_bits;
-      }
-      return true;
-    });
-
-    if (!result) throw new Error("Doesn't support the offered configuration");
-
-    return accepted;
-  }
-
-  /**
-   * Accept extension response from server.
-   *
-   * @param {Array} paramsList Extension parameters
-   * @return {Object} Accepted configuration
-   * @private
-   */
-  acceptAsClient (paramsList) {
-    const params = paramsList[0];
-
-    if (this._options.clientNoContextTakeover != null) {
-      if (
-        this._options.clientNoContextTakeover === false &&
-        params.client_no_context_takeover
-      ) {
-        throw new Error('Invalid value for "client_no_context_takeover"');
-      }
-    }
-    if (this._options.clientMaxWindowBits != null) {
-      if (
-        this._options.clientMaxWindowBits === false &&
-        params.client_max_window_bits
-      ) {
-        throw new Error('Invalid value for "client_max_window_bits"');
-      }
-      if (
-        typeof this._options.clientMaxWindowBits === 'number' &&
-        (!params.client_max_window_bits ||
-          params.client_max_window_bits > this._options.clientMaxWindowBits)
-      ) {
-        throw new Error('Invalid value for "client_max_window_bits"');
-      }
-    }
-
-    return params;
-  }
-
-  /**
-   * Normalize extensions parameters.
-   *
-   * @param {Array} paramsList Extension parameters
-   * @return {Array} Normalized extensions parameters
-   * @private
-   */
-  normalizeParams (paramsList) {
-    return paramsList.map((params) => {
-      Object.keys(params).forEach((key) => {
-        var value = params[key];
-        if (value.length > 1) {
-          throw new Error(`Multiple extension parameters for ${key}`);
-        }
-
-        value = value[0];
-
-        switch (key) {
-          case 'server_no_context_takeover':
-          case 'client_no_context_takeover':
-            if (value !== true) {
-              throw new Error(`invalid extension parameter value for ${key} (${value})`);
-            }
-            params[key] = true;
-            break;
-          case 'server_max_window_bits':
-          case 'client_max_window_bits':
-            if (typeof value === 'string') {
-              value = parseInt(value, 10);
-              if (
-                Number.isNaN(value) ||
-                value < zlib.Z_MIN_WINDOWBITS ||
-                value > zlib.Z_MAX_WINDOWBITS
-              ) {
-                throw new Error(`invalid extension parameter value for ${key} (${value})`);
-              }
-            }
-            if (!this._isServer && value === true) {
-              throw new Error(`Missing extension parameter value for ${key}`);
-            }
-            params[key] = value;
-            break;
-          default:
-            throw new Error(`Not defined extension parameter (${key})`);
-        }
-      });
-      return params;
-    });
-  }
-
-  /**
-   * Decompress data. Concurrency limited by async-limiter.
-   *
-   * @param {Buffer} data Compressed data
-   * @param {Boolean} fin Specifies whether or not this is the last fragment
-   * @param {Function} callback Callback
-   * @public
-   */
-  decompress (data, fin, callback) {
-    zlibLimiter.push((done) => {
-      this._decompress(data, fin, (err, result) => {
-        done();
-        callback(err, result);
-      });
-    });
-  }
-
-  /**
-   * Compress data. Concurrency limited by async-limiter.
-   *
-   * @param {Buffer} data Data to compress
-   * @param {Boolean} fin Specifies whether or not this is the last fragment
-   * @param {Function} callback Callback
-   * @public
-   */
-  compress (data, fin, callback) {
-    zlibLimiter.push((done) => {
-      this._compress(data, fin, (err, result) => {
-        done();
-        callback(err, result);
-      });
-    });
-  }
-
-  /**
-   * Decompress data.
-   *
-   * @param {Buffer} data Compressed data
-   * @param {Boolean} fin Specifies whether or not this is the last fragment
-   * @param {Function} callback Callback
-   * @private
-   */
-  _decompress (data, fin, callback) {
-    const endpoint = this._isServer ? 'client' : 'server';
-
-    if (!this._inflate) {
-      const key = `${endpoint}_max_window_bits`;
-      const windowBits = typeof this.params[key] !== 'number'
-        ? zlib.Z_DEFAULT_WINDOWBITS
-        : this.params[key];
-
-      this._inflate = zlib.createInflateRaw({ windowBits });
-    }
-    this._inflate.writeInProgress = true;
-
-    var totalLength = 0;
-    const buffers = [];
-    var err;
-
-    const onData = (data) => {
-      totalLength += data.length;
-      if (this._maxPayload < 1 || totalLength <= this._maxPayload) {
-        return buffers.push(data);
-      }
-
-      err = new Error('max payload size exceeded');
-      err.closeCode = 1009;
-      this._inflate.reset();
-    };
-
-    const onError = (err) => {
-      cleanup();
-      callback(err);
-    };
-
-    const cleanup = () => {
-      if (!this._inflate) return;
-
-      this._inflate.removeListener('error', onError);
-      this._inflate.removeListener('data', onData);
-      this._inflate.writeInProgress = false;
-
-      if (
-        (fin && this.params[`${endpoint}_no_context_takeover`]) ||
-        this._inflate.pendingClose
-      ) {
-        this._inflate.close();
-        this._inflate = null;
-      }
-    };
-
-    this._inflate.on('error', onError).on('data', onData);
-    this._inflate.write(data);
-    if (fin) this._inflate.write(TRAILER);
-
-    this._inflate.flush(() => {
-      cleanup();
-      if (err) callback(err);
-      else callback(null, bufferUtil.concat(buffers, totalLength));
-    });
-  }
-
-  /**
-   * Compress data.
-   *
-   * @param {Buffer} data Data to compress
-   * @param {Boolean} fin Specifies whether or not this is the last fragment
-   * @param {Function} callback Callback
-   * @private
-   */
-  _compress (data, fin, callback) {
-    if (!data || data.length === 0) {
-      process.nextTick(callback, null, EMPTY_BLOCK);
-      return;
-    }
-
-    const endpoint = this._isServer ? 'server' : 'client';
-
-    if (!this._deflate) {
-      const key = `${endpoint}_max_window_bits`;
-      const windowBits = typeof this.params[key] !== 'number'
-        ? zlib.Z_DEFAULT_WINDOWBITS
-        : this.params[key];
-
-      this._deflate = zlib.createDeflateRaw({
-        memLevel: this._options.memLevel,
-        level: this._options.level,
-        flush: zlib.Z_SYNC_FLUSH,
-        windowBits
-      });
-    }
-    this._deflate.writeInProgress = true;
-
-    var totalLength = 0;
-    const buffers = [];
-
-    const onData = (data) => {
-      totalLength += data.length;
-      buffers.push(data);
-    };
-
-    const onError = (err) => {
-      cleanup();
-      callback(err);
-    };
-
-    const cleanup = () => {
-      if (!this._deflate) return;
-
-      this._deflate.removeListener('error', onError);
-      this._deflate.removeListener('data', onData);
-      this._deflate.writeInProgress = false;
-
-      if (
-        (fin && this.params[`${endpoint}_no_context_takeover`]) ||
-        this._deflate.pendingClose
-      ) {
-        this._deflate.close();
-        this._deflate = null;
-      }
-    };
-
-    this._deflate.on('error', onError).on('data', onData);
-    this._deflate.write(data);
-    this._deflate.flush(zlib.Z_SYNC_FLUSH, () => {
-      cleanup();
-      var data = bufferUtil.concat(buffers, totalLength);
-      if (fin) data = data.slice(0, data.length - 4);
-      callback(null, data);
-    });
-  }
-}
-
-module.exports = PerMessageDeflate;
-
-
-/***/ }),
-/* 4 */
-/***/ (function(module, exports) {
-
-module.exports = require("crypto");
-
-/***/ }),
-/* 5 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-/*!
- * ws: a node.js websocket client
- * Copyright(c) 2011 Einar Otto Stangvik <einaros@gmail.com>
- * MIT Licensed
- */
-
-
-
-const safeBuffer = __webpack_require__(1);
-
-const Buffer = safeBuffer.Buffer;
-
-/**
- * Merges an array of buffers into a new buffer.
- *
- * @param {Buffer[]} list The array of buffers to concat
- * @param {Number} totalLength The total length of buffers in the list
- * @return {Buffer} The resulting buffer
- * @public
- */
-const concat = (list, totalLength) => {
-  const target = Buffer.allocUnsafe(totalLength);
-  var offset = 0;
-
-  for (var i = 0; i < list.length; i++) {
-    const buf = list[i];
-    buf.copy(target, offset);
-    offset += buf.length;
-  }
-
-  return target;
-};
-
-try {
-  const bufferUtil = __webpack_require__(!(function webpackMissingModule() { var e = new Error("Cannot find module \"bufferutil\""); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
-
-  module.exports = Object.assign({ concat }, bufferUtil.BufferUtil || bufferUtil);
-} catch (e) /* istanbul ignore next */ {
-  /**
-   * Masks a buffer using the given mask.
-   *
-   * @param {Buffer} source The buffer to mask
-   * @param {Buffer} mask The mask to use
-   * @param {Buffer} output The buffer where to store the result
-   * @param {Number} offset The offset at which to start writing
-   * @param {Number} length The number of bytes to mask.
-   * @public
-   */
-  const mask = (source, mask, output, offset, length) => {
-    for (var i = 0; i < length; i++) {
-      output[offset + i] = source[i] ^ mask[i & 3];
-    }
-  };
-
-  /**
-   * Unmasks a buffer using the given mask.
-   *
-   * @param {Buffer} buffer The buffer to unmask
-   * @param {Buffer} mask The mask to use
-   * @public
-   */
-  const unmask = (buffer, mask) => {
-    // Required until https://github.com/nodejs/node/issues/9006 is resolved.
-    const length = buffer.length;
-    for (var i = 0; i < length; i++) {
-      buffer[i] ^= mask[i & 3];
-    }
-  };
-
-  module.exports = { concat, mask, unmask };
-}
-
-
-/***/ }),
-/* 6 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-const safeBuffer = __webpack_require__(1);
-
-const Buffer = safeBuffer.Buffer;
-
-exports.BINARY_TYPES = ['nodebuffer', 'arraybuffer', 'fragments'];
-exports.GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-exports.EMPTY_BUFFER = Buffer.alloc(0);
-exports.NOOP = () => {};
-
-
-/***/ }),
 /* 7 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports.generateError = generateError;
-
-var _debug = __webpack_require__(0);
-
-function generateError(srcSecureHash, communication, code, message, destSecureHash) {
-    console.error('Generate error :', message);
-    _debug._console.assert(communication !== undefined && communication !== null, "communication must be a valid FACommunication instance");
-    communication.send(srcSecureHash, destSecureHash, JSON.stringify({
-        "type": "farError",
-        "error": {
-            "code": code,
-            "message": message
-        }
-    }));
-}
-//# sourceMappingURL=error.js.map
-
-/***/ }),
-/* 8 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -8012,7 +7984,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.generateSecureHash = generateSecureHash;
 
-var _jssha = __webpack_require__(22);
+var _jssha = __webpack_require__(21);
 
 var jsSHA = _interopRequireWildcard(_jssha);
 
@@ -8024,10 +7996,9 @@ function generateSecureHash(magicToken, clientGUID) {
     var secureHash = shaObj.getHash("HEX");
     return secureHash;
 }
-//# sourceMappingURL=secure_hash.js.map
 
 /***/ }),
-/* 9 */
+/* 8 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -8039,19 +8010,19 @@ function generateSecureHash(magicToken, clientGUID) {
 
 
 
-const EventEmitter = __webpack_require__(10);
-const crypto = __webpack_require__(4);
-const Ultron = __webpack_require__(11);
-const https = __webpack_require__(28);
-const http = __webpack_require__(12);
-const url = __webpack_require__(13);
+const EventEmitter = __webpack_require__(9);
+const crypto = __webpack_require__(3);
+const Ultron = __webpack_require__(10);
+const https = __webpack_require__(25);
+const http = __webpack_require__(11);
+const url = __webpack_require__(12);
 
-const PerMessageDeflate = __webpack_require__(3);
-const EventTarget = __webpack_require__(32);
-const Extensions = __webpack_require__(14);
-const constants = __webpack_require__(6);
-const Receiver = __webpack_require__(15);
-const Sender = __webpack_require__(17);
+const PerMessageDeflate = __webpack_require__(2);
+const EventTarget = __webpack_require__(29);
+const Extensions = __webpack_require__(13);
+const constants = __webpack_require__(5);
+const Receiver = __webpack_require__(14);
+const Sender = __webpack_require__(16);
 
 const protocolVersions = [8, 13];
 const closeTimeout = 30 * 1000; // Allow 30 seconds to terminate the connection cleanly.
@@ -8752,13 +8723,13 @@ function initAsClient (address, protocols, options) {
 
 
 /***/ }),
-/* 10 */
+/* 9 */
 /***/ (function(module, exports) {
 
 module.exports = require("events");
 
 /***/ }),
-/* 11 */
+/* 10 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -8903,19 +8874,19 @@ module.exports = Ultron;
 
 
 /***/ }),
-/* 12 */
+/* 11 */
 /***/ (function(module, exports) {
 
 module.exports = require("http");
 
 /***/ }),
-/* 13 */
+/* 12 */
 /***/ (function(module, exports) {
 
 module.exports = require("url");
 
 /***/ }),
-/* 14 */
+/* 13 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -8989,7 +8960,7 @@ module.exports = { format, parse };
 
 
 /***/ }),
-/* 15 */
+/* 14 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -9001,13 +8972,13 @@ module.exports = { format, parse };
 
 
 
-const safeBuffer = __webpack_require__(1);
+const safeBuffer = __webpack_require__(0);
 
-const PerMessageDeflate = __webpack_require__(3);
-const isValidUTF8 = __webpack_require__(33);
-const bufferUtil = __webpack_require__(5);
-const ErrorCodes = __webpack_require__(16);
-const constants = __webpack_require__(6);
+const PerMessageDeflate = __webpack_require__(2);
+const isValidUTF8 = __webpack_require__(30);
+const bufferUtil = __webpack_require__(4);
+const ErrorCodes = __webpack_require__(15);
+const constants = __webpack_require__(5);
 
 const Buffer = safeBuffer.Buffer;
 
@@ -9549,7 +9520,7 @@ function toArrayBuffer (buf) {
 
 
 /***/ }),
-/* 16 */
+/* 15 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -9584,7 +9555,7 @@ module.exports = {
 
 
 /***/ }),
-/* 17 */
+/* 16 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -9596,12 +9567,12 @@ module.exports = {
 
 
 
-const safeBuffer = __webpack_require__(1);
-const crypto = __webpack_require__(4);
+const safeBuffer = __webpack_require__(0);
+const crypto = __webpack_require__(3);
 
-const PerMessageDeflate = __webpack_require__(3);
-const bufferUtil = __webpack_require__(5);
-const ErrorCodes = __webpack_require__(16);
+const PerMessageDeflate = __webpack_require__(2);
+const bufferUtil = __webpack_require__(4);
+const ErrorCodes = __webpack_require__(15);
 
 const Buffer = safeBuffer.Buffer;
 
@@ -9998,6 +9969,32 @@ function viewToBuffer (view) {
 
 
 /***/ }),
+/* 17 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.CalleeWS = exports.CalleeSimpleStream = exports.callee = undefined;
+
+var _callee = __webpack_require__(18);
+
+var _simple_stream = __webpack_require__(22);
+
+var _wss = __webpack_require__(23);
+
+exports.callee = _callee.farAwayCallee;
+exports.CalleeSimpleStream = _simple_stream.SimpleStream;
+exports.CalleeWS = _wss.WSS;
+
+var FarAwayJs = { callee: _callee.farAwayCallee, CalleeSimpleStream: _simple_stream.SimpleStream, CalleeWS: _wss.WSS };
+// define some global for Vanilla Js using only on browser side
+if (typeof window !== 'undefined') window.FarAwayJs = FarAwayJs;
+
+/***/ }),
 /* 18 */
 /***/ (function(module, exports, __webpack_require__) {
 
@@ -10007,317 +10004,298 @@ function viewToBuffer (view) {
 Object.defineProperty(exports, "__esModule", {
     value: true
 });
-exports.CalleeWS = exports.CallerWS = exports.CalleeSimpleStream = exports.CallerSimpleStream = exports.callee = exports.caller = undefined;
-
-var _caller = __webpack_require__(19);
-
-var _callee = __webpack_require__(21);
-
-var _simple_stream = __webpack_require__(23);
-
-var _simple_stream2 = __webpack_require__(24);
-
-var _ws = __webpack_require__(25);
-
-var _wss = __webpack_require__(26);
-
-exports.caller = _caller.farAwayCaller;
-exports.callee = _callee.farAwayCallee;
-exports.CallerSimpleStream = _simple_stream.SimpleStream;
-exports.CalleeSimpleStream = _simple_stream2.SimpleStream;
-exports.CallerWS = _ws.WS;
-exports.CalleeWS = _wss.WSS;
-
-var FarAwayJs = { caller: _caller.farAwayCaller, callee: _callee.farAwayCallee, CallerSimpleStream: _simple_stream.SimpleStream, CalleeSimpleStream: _simple_stream2.SimpleStream, CallerWS: _ws.WS, CalleeWS: _wss.WSS };
-// define some global for Vanilla Js using only on browser side
-if (typeof window !== 'undefined') window.FarAwayJs = FarAwayJs;
-//# sourceMappingURL=far_away_js.js.map
-
-/***/ }),
-/* 19 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports.farAwayCaller = undefined;
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
+exports.farAwayCallee = exports.CallableObject = undefined;
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
 
-var _debug = __webpack_require__(0);
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
-var _error = __webpack_require__(7);
+var _debug = __webpack_require__(1);
 
-var _chance = __webpack_require__(2);
+var _error = __webpack_require__(20);
+
+var _chance = __webpack_require__(6);
+
+var Chance = _interopRequireWildcard(_chance);
+
+var _secure_hash = __webpack_require__(7);
+
+function _interopRequireWildcard(obj) { if (obj && obj.__esModule) { return obj; } else { var newObj = {}; if (obj != null) { for (var key in obj) { if (Object.prototype.hasOwnProperty.call(obj, key)) newObj[key] = obj[key]; } } newObj.default = obj; return newObj; } }
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
 var _callables = {};
 var _rCallIdx = 0;
-var _promiseOkCbksH = {};
 var _com = void 0,
     _comReadyPromise = void 0;
-var _importedInstiables = {};
-// unique guid for caller instance
-var _myCallerGUID = void 0;
-var _myCallerSecureHash = void 0;
-var _backCreates = {};
-function setCommunication(communication) {
+var _instancesH = {};
+var _magicToken = new Chance.Chance().guid();
+var _callerSecureHashes = {};
+var _myCalleeSecureHash = (0, _secure_hash.generateSecureHash)(_magicToken, new Chance.Chance().guid());
+var _instanceIdx = -1;
+var setCommunication = function setCommunication(communication) {
     _com = communication;
-    _com.onMessage(_messageCbk);
+    _com.onMessage(_myCalleeSecureHash, _messageCbk, true);
     _comReadyPromise = _com.initListening();
     return _comReadyPromise;
-}
-function regBackCreateObject(name, backCreateObject) {
-    _debug._console.assert(name, name.length, "name of BackCreateObject must be a not null string");
-    _backCreates[name] = backCreateObject;
-}
+};
 var _messageCbk = function _messageCbk(data) {
     var messageObj = void 0;
     try {
-        messageObj = JSON.parse(data.message);
+        messageObj = JSON.parse(data);
     } catch (e) {
-        _debug._console.error("JSON.parse error: " + data.message, e);
-        (0, _error.generateError)(_myCallerSecureHash, _com, 3, "Message is not in the good format");
+        _debug._console.error("JSON parse error, message is not in the good format : " + data);
+        return;
     }
+    var secureHash = void 0;
     try {
-        _treat[messageObj.type](messageObj);
+        secureHash = _treat[messageObj.type](messageObj);
     } catch (e) {
-        if (e.send) {
-            (0, _error.generateError)(_myCallerSecureHash, _com, 1, e.message);
+        if (e.send && e.callerSecureHash) {
+            (0, _error.generateError)(_myCalleeSecureHash, _com, 1, e.message, e.callerSecureHash);
         } else {
-            console.error('Error : ', e.message, e.stack);
+            _debug._console.error("Error (not sent) on treat of type(" + messageObj.type + ") : ", e);
         }
     }
+    _debug._console.log("\n");
+    return secureHash;
 };
-var _treat = {};
-_treat.farError = function (errorObj) {
-    _debug._console.error("Error on simpleRpc", errorObj.error);
-};
-_treat.farCallReturn = function (callObj) {
-    _debug._console.log('treat.farCallReturn', callObj, _promiseOkCbksH);
-    if (typeof callObj.rIdx !== "number") {
-        throw {
-            "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
-            "send": false
-        };
-    }
-    var ret = callObj.return;
-    _debug._console.log('ici', _typeof(_promiseOkCbksH[callObj.rIdx]));
-    _promiseOkCbksH[callObj.rIdx](ret); // complete the associated Promise
-};
-_treat.farBackCreateReturn = function (callObj) {
-    _debug._console.log('treat.farBackCreateReturn', callObj);
-    if (typeof callObj.rIdx !== "number") {
-        throw {
-            "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
-            "send": false
-        };
-    }
-    var ret = callObj.return;
-    // Instantiate the "BackCreate" object
-    if (!_backCreates[ret.constructorName]) {
-        var availableBCObjectsStr = "";
-        var zeroIdxFlag = true;
-        for (var i in _backCreates) {
-            availableBCObjectsStr += (!zeroIdxFlag ? ', ' : '') + i;
-            zeroIdxFlag = false;
-        }
-        throw {
-            "message": "backCreateConstructor (" + ret.constructorName + ") is not registered by the caller (" + _myCallerGUID + "). Avalaible objects : " + availableBCObjectsStr + ".",
-            "send": true
-        };
-    }
-    ret.constructorArgs.unshift(null);
-    console.log('---> back create', ret.constructorName, _backCreates, ret.constructorArgs);
-    var backCreateInst = new (Function.prototype.bind.apply(_backCreates[ret.constructorName], ret.constructorArgs))();
-    _debug._console.assert(backCreateInst.init, "BackCreate object must have an 'init' method wich must return a promise");
-    backCreateInst.init.apply(backCreateInst, ret.initArgs).then(function () {
-        _promiseOkCbksH[callObj.rIdx](backCreateInst);
-    });
-};
-_treat.farInstantiateReturn = function (callObj) {
-    _debug._console.log('treat.farInstantiateReturn', callObj);
-    if (typeof callObj.rIdx !== "number") {
-        throw {
-            "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
-            "send": false
-        };
-    }
-    var instanceRpc = new FarAwayCallerInstance(callObj.rIdx);
-    _promiseOkCbksH[callObj.rIdx](instanceRpc); // complete the associated Promise
-};
-_treat.farImportReturn = function (callObj) {
-    _debug._console.log('treat.farImportReturn', callObj);
-    if (typeof callObj.rIdx !== "number") {
-        throw {
-            "message": "rIdx is empty or invalid : " + callObj.rCallrIdx,
-            "send": false
-        };
-    }
-    _myCallerSecureHash = callObj.callerSecureHash;
-    if (!_myCallerSecureHash) {
-        throw {
-            "message": "_myCallerSecureHash is empty or invalid in response",
-            "send": false
-        };
-    }
-    var wrapObjects = _createWrappingObjects(callObj.objects);
-    _debug._console.log("--> Result of farImportReturn", wrapObjects);
-    _promiseOkCbksH[callObj.rIdx](wrapObjects); // complete the associated Promise
-};
-function _createWrappingObjects(objDescriptions) {
-    var wrappingObjects = {};
-    objDescriptions.forEach(function (objDescription) {
-        wrappingObjects[objDescription.name] = _wrappingObjFactory[objDescription.type](objDescription);
-    });
-    return wrappingObjects;
+function register(object) {
+    var name = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : undefined;
+    var excludeCalls = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : undefined;
+
+    _debug._console.assert(typeof object === 'function' && object, "Entity must be a not null function (" + object + " given)");
+    name = name ? name : object.name;
+    _debug._console.assert(typeof name === "string");
+    _callables[name] = new CallableObject(name, object, "instantiable", excludeCalls);
 }
-var _wrappingObjFactory = {};
-_wrappingObjFactory['function'] = function (objDescription) {
-    var func = function func() {
-        var args = Array.prototype.slice.call(arguments);
-        return _farCall(objDescription.name, args);
-    };
-    return func;
-};
-_wrappingObjFactory['instantiable'] = function (objDescription) {
-    var factory = {};
-    factory[objDescription] = {};
-    /*
-    for (let i in objDescription.structure) {
-      if (i !== "__prototype__") {
-        if (objDescription[i] === "function") {
-          //factory[objDescription.name][i] = function
-        }
-      }
-    }*/
-    var remotePrototype = objDescription.structure.__prototype__;
 
-    var _loop = function _loop(i) {
-        factory[i] = function () {
-            var instanceIdx = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : undefined;
+var CallableObject = exports.CallableObject = function () {
+    function CallableObject(name, object, type) {
+        var excludeCalls = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : [];
 
-            return _farCall(objDescription.name + '.' + remotePrototype[i], [], instanceIdx);
-        };
-    };
+        _classCallCheck(this, CallableObject);
 
-    for (var i in remotePrototype) {
-        _loop(i);
-    }
-};
-
-var FarAwayCallerInstance = function () {
-    function FarAwayCallerInstance(instanceIdx) {
-        _classCallCheck(this, FarAwayCallerInstance);
-
-        this.__farAwayInstIdx__ = instanceIdx;
+        this.structure = {};
+        this.name = name;
+        this.type = type;
+        this.object = object;
+        this._excludeCalls = excludeCalls;
+        this.structure = this._exploreObject(this.object);
     }
 
-    _createClass(FarAwayCallerInstance, [{
-        key: "farCall",
-        value: function farCall(objectName, args) {
-            return _farCall(objectName, args, this.__farAwayInstIdx__);
+    _createClass(CallableObject, [{
+        key: "_exploreObject",
+        value: function _exploreObject(object) {
+            var objectStruct = { __prototype__: {} };
+            for (var i in object) {
+                if (this._excludeCalls.indexOf(i) === -1) objectStruct[i] = _typeof(object[i]);
+            }
+            if (object.prototype) {
+                for (var _i in object.prototype) {
+                    if (this._excludeCalls.indexOf(_i) === -1) objectStruct.__prototype__[_i] = _typeof(object[_i]);
+                }
+            }
+            return objectStruct;
         }
     }]);
 
-    return FarAwayCallerInstance;
+    return CallableObject;
 }();
 
-function _getRCallIdx() {
-    return _rCallIdx++;
-}
-function _extractArgs(argsIn) {
-    var argsOut = [];
-    for (var ct = 1; ct < argsIn.length; ct++) {
-        argsOut.push(argsIn[ct]);
+var _checkSecureHash = function _checkSecureHash(callerSecureHash, instanceIdx) {
+    if (_callerSecureHashes[callerSecureHash] === undefined) {
+        (0, _error.generateError)(_myCalleeSecureHash, _com, 4, "The caller (" + callerSecureHash + ") seems not to be registered, it must call farImport before further operation and then pass secureHash on each request", callerSecureHash);
+        return false;
     }
-    return argsOut;
-}
-function _farCall(objectName) {
-    var args = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : [];
-    var instanceIdx = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : undefined;
-
-    _debug._console.log('farCall : ', objectName, args);
-    _debug._console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation');
-    _debug._console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
-    if (typeof objectName !== "string" || !objectName.length) {
+    if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== callerSecureHash) {
+        (0, _error.generateError)(_myCalleeSecureHash, _com, 4, 'The caller is not allowed to access this ressource', callerSecureHash);
+        return false;
+    }
+    return true;
+};
+var _treat = {};
+_treat.farInstantiate = function (constructorObj) {
+    _debug._console.log('treat.farInstantiate', constructorObj);
+    _debug._console.assert(_com, 'communication must be set before calling this function');
+    if (!_checkSecureHash(constructorObj.callerSecureHash)) return; // -->
+    var Constructor = _extractConstructorReferenceWName(constructorObj);
+    try {
+        constructorObj.args.unshift(null);
+        var instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args))();
+        _instancesH[++_instanceIdx] = { "instance": instance, "calleSecureHash": constructorObj.callerSecureHash };
+    } catch (e) {
+        _debug._console.error(e);
+        throw constructorObj.name + " seems not to be a valid constructor";
+    }
+    _debug._console.log("\n_sendFarInstantiateReturn", _instanceIdx);
+    _com.send(_myCalleeSecureHash, constructorObj.callerSecureHash, JSON.stringify({
+        "type": "farInstantiateReturn",
+        "name": constructorObj.name,
+        "rIdx": constructorObj.rIdx,
+        "instanceIdx": _instanceIdx
+    }));
+    return constructorObj.callerSecureHash;
+};
+_treat.farCall = function (callObj) {
+    _debug._console.log('treat.farCall', callObj);
+    _debug._console.assert(_com, 'communication must be set before calling this function');
+    if (!_checkSecureHash(callObj.callerSecureHash, callObj.instanceIdx)) return; // -->
+    if (typeof callObj.name !== "string" || !callObj.name.length) {
         throw {
-            "message": "Method is empty or invalid : " + objectName,
-            "send": false
+            "message": "name is empty or invalid : " + callObj.name,
+            "send": true,
+            "callerSecureHash": callObj.callerSecureHash
         };
     }
-    var idx = _getRCallIdx();
-    var promise = new Promise(function (ok, ko) {
-        _promiseOkCbksH[idx] = ok;
+    var obj = _extractObjectReferenceWName(callObj);
+    var ret = obj();
+    if (ret.getBCInitDataForCaller) {
+        _sendBackCreateReturn(callObj, ret);
+        return;
+    }
+    if (ret instanceof Promise) {
+        ret.then(function (ret) {
+            _sendFarCallReturn(callObj, ret);
+        }).catch(function (error) {
+            (0, _error.generateError)(_myCalleeSecureHash, _com, 10, error, callObj.callerSecureHash);
+        });
+    } else {
+        _sendFarCallReturn(callObj, ret);
+    }
+};
+_treat.farImport = function (callObj) {
+    _debug._console.log('treat.farImport', callObj);
+    _debug._console.assert(_com, 'communication must be set before calling this function');
+    if (_typeof(callObj.symbols) !== "object" || !callObj.symbols.length) {
+        throw {
+            "message": "List of symbols is empty or invalid : " + callObj.symbols,
+            "send": true,
+            "callerSecureHash": callObj.callerSecureHash
+        };
+    }
+    if (!callObj.callerGUID) {
+        throw {
+            "message": "GUID must be provided",
+            "send": true,
+            "callerSecureHash": null
+        };
+    }
+    var result = [];
+    callObj.symbols.forEach(function (symbol) {
+        if (!_callables[symbol]) {
+            throw {
+                "message": "Symbol '" + symbol + "' does not exist in callee",
+                "send": true,
+                "callerSecureHash": callObj.callerGUID
+            };
+        }
+        result.push(_callables[symbol]);
     });
-    _comReadyPromise.then(function () {
-        _com.send(null, _myCallerSecureHash, JSON.stringify({
-            "type": "farCall",
-            "objectName": objectName,
-            "args": args,
-            "instanceIdx": instanceIdx,
-            "rIdx": idx,
-            "callerSecureHash": _myCallerSecureHash
-        }));
-    });
-    return promise;
+    // CallerSecureHash is just a GUID, we generate callerSecureHash with it
+    var callerSecureHash = (0, _secure_hash.generateSecureHash)(_magicToken, callObj.callerGUID);
+    // Register client
+    _debug._console.log("--> Generate secure hash for GUID (" + callObj.callerGUID + ")");
+    _debug._console.log("    : " + callerSecureHash);
+    _callerSecureHashes[callerSecureHash] = true;
+    // At this point, caller must now provide its secureHash
+    _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash);
+    _debug._console.log("\n_sendFarImportReturn", result);
+    _com.send(_myCalleeSecureHash, callerSecureHash, JSON.stringify({
+        "type": "farImportReturn",
+        "rIdx": callObj.rIdx,
+        "callerSecureHash": callerSecureHash,
+        "objects": result
+    }));
+};
+function _sendFarCallReturn(callObj, ret) {
+    _debug._console.log("\n_sendFarCallReturn", ret);
+    _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
+        "type": "farCallReturn",
+        "rIdx": callObj.rIdx,
+        "return": ret
+    }));
 }
-function farImport(objNames) {
-    _debug._console.log('farImport : ', objNames);
-    var idx = _getRCallIdx();
-    var promise = new Promise(function (ok, ko) {
-        _promiseOkCbksH[idx] = ok;
-    });
-    var chance = new _chance.Chance.Chance();
-    _myCallerGUID = chance.guid();
-    _comReadyPromise.then(function () {
-        _com.send(null, _myCallerGUID, JSON.stringify({
-            "type": "farImport",
-            "rIdx": idx,
-            "callerGUID": _myCallerGUID,
-            "symbols": objNames
-        }));
-    });
-    return promise;
+function _sendBackCreateReturn(callObj, ret) {
+    _debug._console.log("\n_sendBackCreateReturn", ret.getBCInitDataForCaller());
+    _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
+        "type": "farBackCreateReturn",
+        "rIdx": callObj.rIdx,
+        "return": ret.getBCInitDataForCaller()
+    }));
 }
-function farInstantiate(constructorName) {
-    var args = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : [];
-
-    _debug._console.log('farInstantiate : ', constructorName);
-    _debug._console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method');
-    var idx = _getRCallIdx();
-    var promise = new Promise(function (ok, ko) {
-        _promiseOkCbksH[idx] = ok;
-    });
-    _comReadyPromise.then(function () {
-        _com.send(null, _myCallerSecureHash, JSON.stringify({
-            "type": "farInstantiate",
-            "constructorName": constructorName,
-            "rIdx": idx,
-            "args": args,
-            "callerSecureHash": _myCallerSecureHash
-        }));
-    });
-    return promise;
+function _extractConstructorReferenceWName(callObj) {
+    _debug._console.log("\n_extractConstructorReferenceWName", callObj);
+    var obj = _callables[callObj.name].object;
+    var objNameTab = callObj.name.split('.');
+    for (var ct = 1; ct < objNameTab.length; ct++) {
+        obj = obj[objNameTab[ct]];
+        if (!obj) {
+            throw {
+                "message": "Object " + callObj.name + " does not exist in callee ('" + callObj.name + "' called)",
+                "send": true,
+                "callerSecureHash": callObj.callerSecureHash
+            };
+        }
+    }
+    if (!obj) {
+        throw {
+            "message": "Object " + callObj.name + " does not exist in callee ('" + callObj.name + "' called)",
+            "send": true,
+            "callerSecureHash": callObj.callerSecureHash
+        };
+    }
+    return obj;
 }
-var farAwayCaller = exports.farAwayCaller = {
+function _extractObjectReferenceWName(callObj) {
+    _debug._console.log("\n_extractObjectReferenceWName", callObj);
+    var obj = void 0;
+    var context = void 0;
+    var objNameTab = callObj.name.split('.');
+    if (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) {
+        var localInstanceObj = _instancesH[callObj.instanceIdx];
+        if (localInstanceObj.calleSecureHash !== callObj.callerSecureHash) {
+            throw {
+                "message": "Security error : you try to access a unavailable instance for your session",
+                "send": true,
+                "callerSecureHash": callObj.callerSecureHash
+            };
+        }
+        context = localInstanceObj.instance;
+        obj = context[objNameTab[1]];
+    } else {
+        obj = _callables[objNameTab[0]].object;
+        for (var ct = 1; ct < objNameTab.length; ct++) {
+            obj = obj[objNameTab[ct]].object;
+            if (!obj) {
+                throw {
+                    "message": "(1) Object " + callObj.name + " does not exist in callee ('" + callObj.name + "' called)",
+                    "send": true,
+                    "callerSecureHash": callObj.callerSecureHash
+                };
+            }
+        }
+        context = this;
+    }
+    if (!obj || typeof obj !== 'function') {
+        throw {
+            "message": "(2) Object " + callObj.name + " of type '" + (typeof obj === "undefined" ? "undefined" : _typeof(obj)) + "' does not exist " + (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null ? "(in instance) " : "") + ("in callee ('" + callObj.name + "' called)"),
+            "send": true,
+            "callerSecureHash": callObj.callerSecureHash
+        };
+    }
+    return function () {
+        return obj.apply(context, callObj.args);
+    };
+}
+var farAwayCallee = exports.farAwayCallee = {
     debugOn: _debug.debugOn,
     setCommunication: setCommunication,
-    farCall: _farCall,
-    farInstantiate: farInstantiate,
-    farImport: farImport,
-    regBackCreateObject: regBackCreateObject
+    register: register
 };
-//# sourceMappingURL=caller.js.map
 
 /***/ }),
-/* 20 */
+/* 19 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -10336,11 +10314,7 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
  * @extends Console
  * This class implements all Browser Console methods
  */
-/**
- * @class NullConsole
- * @extends Console
- * This class implements all Browser Console methods
- */var NullConsole = exports.NullConsole = function () {
+var NullConsole = exports.NullConsole = function () {
     function NullConsole() {
         _classCallCheck(this, NullConsole);
     }
@@ -10463,10 +10437,9 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
 
 
 var nullConsole = exports.nullConsole = new NullConsole();
-//# sourceMappingURL=console.js.map
 
 /***/ }),
-/* 21 */
+/* 20 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -10475,292 +10448,24 @@ var nullConsole = exports.nullConsole = new NullConsole();
 Object.defineProperty(exports, "__esModule", {
     value: true
 });
-exports.farAwayCallee = exports.CallableObject = undefined;
+exports.generateError = generateError;
 
-var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
+var _debug = __webpack_require__(1);
 
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _debug = __webpack_require__(0);
-
-var _error = __webpack_require__(7);
-
-var _chance = __webpack_require__(2);
-
-var _secure_hash = __webpack_require__(8);
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-var _callables = {};
-var _rCallIdx = 0;
-var _com = void 0,
-    _comReadyPromise = void 0;
-var _instancesH = {};
-var _magicToken = new _chance.Chance.Chance().guid();
-var _callerSecureHashes = {};
-var _myCalleeSecureHash = (0, _secure_hash.generateSecureHash)(_magicToken, new _chance.Chance.Chance().guid());
-var setCommunication = function setCommunication(communication) {
-    _com = communication;
-    _com.onMessage(_myCalleeSecureHash, _messageCbk, true);
-    _comReadyPromise = _com.initListening();
-    return _comReadyPromise;
-};
-var _messageCbk = function _messageCbk(data) {
-    var messageObj = void 0;
-    try {
-        messageObj = JSON.parse(data);
-    } catch (e) {
-        _debug._console.error("JSON parse error, message is not in the good format : " + data);
-        return;
-    }
-    var secureHash = void 0;
-    try {
-        secureHash = _treat[messageObj.type](messageObj);
-    } catch (e) {
-        if (e.send && e.secureHash) {
-            (0, _error.generateError)(_myCalleeSecureHash, _com, 1, e.message, e.secureHash);
-        } else {
-            _debug._console.error("Error (not sent) on treat of type(" + messageObj.type + ") : ", e);
+function generateError(srcSecureHash, communication, code, message, destSecureHash) {
+    console.error('Generate error :', message);
+    _debug._console.assert(communication !== undefined && communication !== null, "communication must be a valid FACommunication instance");
+    communication.send(srcSecureHash, destSecureHash, JSON.stringify({
+        "type": "farError",
+        "error": {
+            "code": code,
+            "message": message
         }
-    }
-    _debug._console.log("\n");
-    return secureHash;
-};
-function regInstantiable(object, excludeCalls) {
-    var objectName = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : undefined;
-
-    _debug._console.assert(typeof object === 'function' && object, "Entity must be a not null function (" + object + " given)");
-    var name = objectName ? objectName : object.name;
-    _debug._console.assert(typeof name === "string");
-    _callables[name] = new CallableObject(name, object, "instantiable", excludeCalls);
-}
-
-var CallableObject = exports.CallableObject = function () {
-    function CallableObject(name, object, type) {
-        var excludeCalls = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : [];
-
-        _classCallCheck(this, CallableObject);
-
-        this.structure = {};
-        this.name = name;
-        this.type = type;
-        this.object = object;
-        this._excludeCalls = excludeCalls;
-        this.structure = this._exploreObject(this.object);
-    }
-
-    _createClass(CallableObject, [{
-        key: "_exploreObject",
-        value: function _exploreObject(object) {
-            if (this.type === "function") return null; // --> return
-            var objectStruct = { __prototype__: {} };
-            for (var i in object) {
-                if (this._excludeCalls.indexOf(i) === -1) objectStruct[i] = _typeof(object[i]);
-            }
-            if (object.prototype) {
-                for (var _i in object.prototype) {
-                    if (this._excludeCalls.indexOf(_i) === -1) objectStruct.__prototype__[_i] = _typeof(object[_i]);
-                }
-            }
-            return objectStruct;
-        }
-    }]);
-
-    return CallableObject;
-}();
-
-function regFunction(func, funcName) {
-    console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)');
-    var name = funcName ? funcName : funcName.name;
-    _callables[name] = new CallableObject(name, func, "function");
-}
-var _checkSecureHash = function _checkSecureHash(callerSecureHash, instanceIdx) {
-    if (_callerSecureHashes[callerSecureHash] === undefined) {
-        (0, _error.generateError)(_myCalleeSecureHash, _com, 4, "The caller (" + callerSecureHash + ") seems not to be registered, it must call farImport before further operation and then pass secureHash on each request", callerSecureHash);
-        return false;
-    }
-    if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== callerSecureHash) {
-        (0, _error.generateError)(_myCalleeSecureHash, _com, 4, 'The caller is not allowed to access this ressource', callerSecureHash);
-        return false;
-    }
-    return true;
-};
-var _treat = {};
-_treat.farInstantiate = function (constructorObj) {
-    _debug._console.log('treat.farInstantiate', constructorObj);
-    _debug._console.assert(_com, 'communication must be set before calling this function');
-    if (!_checkSecureHash(constructorObj.callerSecureHash)) return; // -->
-    var Constructor = _extractConstructorReferenceWName(constructorObj);
-    try {
-        constructorObj.args.unshift(null);
-        var instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args))();
-        _instancesH[constructorObj.rIdx] = { "instance": instance, "secureHash": constructorObj.callerSecureHash };
-    } catch (e) {
-        _debug._console.error(e);
-        throw constructorObj.constructorName + " seems not to be a valid constructor";
-    }
-    _com.send(_myCalleeSecureHash, constructorObj.callerSecureHash, JSON.stringify({
-        "type": "farInstantiateReturn",
-        "rIdx": constructorObj.rIdx
-    }));
-    return constructorObj.callerSecureHash;
-};
-_treat.farCall = function (callObj) {
-    _debug._console.log('treat.farCall', callObj);
-    _debug._console.assert(_com, 'communication must be set before calling this function');
-    if (!_checkSecureHash(callObj.callerSecureHash, callObj.instanceIdx)) return; // -->
-    if (typeof callObj.objectName !== "string" || !callObj.objectName.length) {
-        throw {
-            "message": "objectName is empty or invalid : " + callObj.objectName,
-            "send": true,
-            "secureHash": callObj.callerSecureHash
-        };
-    }
-    var obj = _extractObjectReferenceWName(callObj);
-    var ret = obj();
-    if (ret.getBCInitDataForCaller) {
-        _sendBackCreateReturn(callObj, ret);
-        return;
-    }
-    if (ret instanceof Promise) {
-        ret.then(function (ret) {
-            _sendFarCallReturn(callObj, ret);
-        }).catch(function (error) {
-            (0, _error.generateError)(_myCalleeSecureHash, _com, 10, error, callObj.callerSecureHash);
-        });
-    } else {
-        _sendFarCallReturn(callObj, ret);
-    }
-};
-_treat.farImport = function (callObj) {
-    _debug._console.log('treat.farImport', callObj);
-    _debug._console.assert(_com, 'communication must be set before calling this function');
-    if (_typeof(callObj.symbols) !== "object" || !callObj.symbols.length) {
-        throw {
-            "message": "List of symbols is empty or invalid : " + callObj.symbols,
-            "send": true,
-            "callerSecureHash": callObj.callerSecureHash
-        };
-    }
-    if (!callObj.callerGUID) {
-        throw {
-            "message": "GUID must be provided",
-            "send": true,
-            "callerSecureHash": null
-        };
-    }
-    var result = [];
-    callObj.symbols.forEach(function (symbol) {
-        if (!_callables[symbol]) {
-            throw {
-                "message": "Symbol '" + symbol + "' does not exist in callee",
-                "send": true,
-                "callerSecureHash": callObj.callerGUID
-            };
-        }
-        result.push(_callables[symbol]);
-    });
-    // CallerSecureHash is just a GUID, we generate callerSecureHash with it
-    var callerSecureHash = (0, _secure_hash.generateSecureHash)(_magicToken, callObj.callerGUID);
-    // Register client
-    _debug._console.log("--> Generate secure hash for GUID (" + callObj.callerGUID + ")");
-    _debug._console.log("    : " + callerSecureHash);
-    _callerSecureHashes[callerSecureHash] = true;
-    _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash);
-    // At this point, caller must provide its secureHash
-    _debug._console.log("--> Send back :");
-    _debug._console.log(result);
-    setTimeout(function () {
-        _com.send(_myCalleeSecureHash, callerSecureHash, JSON.stringify({
-            "type": "farImportReturn",
-            "rIdx": callObj.rIdx,
-            "callerSecureHash": callerSecureHash,
-            "objects": result
-        }));
-    }, 0);
-};
-function _sendFarCallReturn(callObj, ret) {
-    _debug._console.log("\n_sendFarCallReturn", ret);
-    _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
-        "type": "farCallReturn",
-        "rIdx": callObj.rIdx,
-        "return": ret
     }));
 }
-function _sendBackCreateReturn(callObj, ret) {
-    _debug._console.log("\n_sendBackCreateReturn", ret.getBCInitDataForCaller());
-    _com.send(_myCalleeSecureHash, callObj.callerSecureHash, JSON.stringify({
-        "type": "farBackCreateReturn",
-        "rIdx": callObj.rIdx,
-        "return": ret.getBCInitDataForCaller()
-    }));
-}
-function _extractConstructorReferenceWName(callObj) {
-    _debug._console.log("\n_extractConstructorReferenceWName", callObj);
-    var obj = _callables[callObj.constructorName].object;
-    var objNameTab = callObj.constructorName.split('.');
-    for (var ct = 1; ct < objNameTab.length; ct++) {
-        obj = obj[objNameTab[ct]];
-        if (!obj) {
-            throw {
-                "message": "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
-                "send": true,
-                "secureHash": callObj.callerSecureHash
-            };
-        }
-    }
-    if (!obj) {
-        throw {
-            "message": "Object " + callObj.constructorName + " does not exist in callee ('" + callObj.constructorName + "' called)",
-            "send": true,
-            "callerSecureHash": callObj.callerSecureHash
-        };
-    }
-    return obj;
-}
-function _extractObjectReferenceWName(callObj) {
-    _debug._console.log("\n_extractObjectReferenceWName", callObj);
-    var obj = void 0;
-    var context = void 0;
-    var objNameTab = callObj.objectName.split('.');
-    if (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) {
-        context = _instancesH[callObj.instanceIdx].instance;
-        obj = context[objNameTab[0]];
-    } else {
-        obj = _callables[objNameTab[0]].object;
-        for (var ct = 1; ct < objNameTab.length; ct++) {
-            obj = obj[objNameTab[ct]].object;
-            if (!obj) {
-                throw {
-                    "message": "Object " + callObj.objectName + " does not exist in callee ('" + callObj.objectName + "' called)",
-                    "send": true,
-                    "callerSecureHash": callObj.callerSecureHash
-                };
-            }
-        }
-        context = this;
-    }
-    if (!obj || typeof obj !== 'function') {
-        throw {
-            "message": "Object " + callObj.objectName + " does not exist " + (callObj.instanceId ? "(in instance) " : "") + ("in callee ('" + callObj.objectName + "' called)"),
-            "send": true,
-            "callerSecureHash": callObj.callerSecureHash
-        };
-    }
-    return function () {
-        return obj.apply(context, callObj.args);
-    };
-}
-var farAwayCallee = exports.farAwayCallee = {
-    debugOn: _debug.debugOn,
-    setCommunication: setCommunication,
-    regInstantiable: regInstantiable,
-    regFunction: regFunction
-};
-//# sourceMappingURL=callee.js.map
 
 /***/ }),
-/* 22 */
+/* 21 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -10813,7 +10518,7 @@ new b(2147483648,2147516424)];W=[[0,36,3,41,18],[1,44,10,45,2],[62,6,43,15,61],[
 
 
 /***/ }),
-/* 23 */
+/* 22 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -10826,161 +10531,11 @@ exports.SimpleStream = undefined;
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
-var _debug = __webpack_require__(0);
+var _chance = __webpack_require__(6);
 
-var _chance = __webpack_require__(2);
+var _secure_hash = __webpack_require__(7);
 
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-var SimpleStream = exports.SimpleStream = function () {
-    function SimpleStream() {
-        var host = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : "localhost";
-
-        var _this = this;
-
-        var port = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "8080";
-        var calleeSecureHash = arguments[2];
-
-        _classCallCheck(this, SimpleStream);
-
-        this._treat = {};
-        this._myCallerGUID = new _chance.Chance.Chance().guid();
-        this.addEventListener = function (cbk) {
-            _debug._console.log('addEventListener');
-            _debug._console.assert(cbk && typeof cbk === "function", "Arg 'cbk' must be provided (function)");
-            var listener = {
-                cbk: cbk,
-                arrayIdx: null
-            };
-            this._listeners.push(listener);
-            listener.arrayIdx = this._listenersByType.length - 1;
-            return this._listeners.length - 1;
-        };
-        this.removeEventListener = function (listenerIdx) {
-            // pre
-            _debug._console.assert(listenerIdx !== undefined && listenerIdx !== null && listenerIdx >= 0, "listenerIdx must be a not null integer");
-            var listener = this._listeners[listenerIdx];
-            _debug._console.assert(listener, "listener (" + listenerIdx + ") must be a not null, maybe you have removed the listener twice", this._listeners);
-            this._listeners[listenerIdx] = undefined;
-        };
-        _debug._console.assert(host && host.length, 'host must be a non null string');
-        _debug._console.assert(port && port.length, 'port must be a non null string');
-        _debug._console.assert(calleeSecureHash && calleeSecureHash.length, 'calleeSecureHash must be a non null string');
-        this._host = host;
-        this._port = port;
-        this._listeners = [];
-        this._listenersByType = {};
-        this._calleeSecureHash = calleeSecureHash;
-        this._treat.farHandShakeReturn = function (data) {
-            return _this._treatFarHandShakeReturn(data);
-        };
-    }
-
-    _createClass(SimpleStream, [{
-        key: "init",
-        value: function init() {
-            var _this2 = this;
-
-            _debug._console.assert(this._ws === undefined, "You have already init the WebSocket listening");
-            var wsServer = "ws://" + this._host + ":" + this._port;
-            this._ws = new WebSocket(wsServer);
-            var declareWsReady = void 0;
-            var openingPromise = new Promise(function (ok, ko) {
-                return declareWsReady = ok;
-            });
-            this._ws.addEventListener('open', function () {
-                declareWsReady();
-            });
-            this._ws.addEventListener('message', function (event) {
-                return _this2._messageHandler(event);
-            }, false);
-            var finalPromise = new Promise(function (ok, ko) {
-                _this2._handShakeOkPromise = ok;
-            });
-            openingPromise.then(function () {
-                return _this2._farHandShake();
-            });
-            return finalPromise; // this promise will be completed when farHandShakeReturn messagefrom Callee SimpleStream is received and treated
-        }
-    }, {
-        key: "_farHandShake",
-        value: function _farHandShake() {
-            _debug._console.log('SimpleStream farHandShake');
-            this._ws.send(JSON.stringify({
-                calleeSecureHash: this._calleeSecureHash,
-                callerSecureHash: this._myCallerGUID,
-                message: JSON.stringify({
-                    "type": "farHandShake",
-                    "callerGUID": this._myCallerGUID
-                })
-            }));
-        }
-    }, {
-        key: "_treatFarHandShakeReturn",
-        value: function _treatFarHandShakeReturn(callObj) {
-            _debug._console.log('treat.farHandShakeReturn', callObj);
-            this._mySecureHash = callObj.callerSecureHash;
-            if (!this._mySecureHash) throw "_myCallerSecureHash is empty or invalid in response";
-            this._handShakeOkPromise(); // complete the finalPromise instantiated in init method
-        }
-    }, {
-        key: "_messageHandler",
-        value: function _messageHandler(event) {
-            _debug._console.log("SimpleStream Caller message handler : listen by " + this._listeners.length + " listeners");
-            var data = void 0;
-            try {
-                data = JSON.parse(event.data);
-            } catch (e) {
-                throw "Data from stream is not in the good format";
-            }
-            var messageObj = null;
-            try {
-                messageObj = JSON.parse(data.message);
-            } catch (e) {
-                // it is a raw string message maybe
-            }
-            if (messageObj && messageObj.type && this._treat[messageObj.type]) {
-                // This is the result of the HandShake request (the first request)
-                var secureHash = void 0;
-                try {
-                    secureHash = this._treat[messageObj.type](messageObj);
-                } catch (e) {
-                    _debug._console.error("Error on treat of type(" + messageObj.type + ") : ", e);
-                }
-                return secureHash; // --> return
-            }
-            // This is a "normal" stream event, we give it to the listeners
-            if (this._listeners) {
-                this._listeners.forEach(function (listener) {
-                    return listener.cbk(data.message);
-                });
-            }
-        }
-    }]);
-
-    return SimpleStream;
-}();
-//# sourceMappingURL=simple_stream.js.map
-
-/***/ }),
-/* 24 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports.SimpleStream = undefined;
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _chance = __webpack_require__(2);
-
-var _secure_hash = __webpack_require__(8);
-
-var _debug = __webpack_require__(0);
+var _debug = __webpack_require__(1);
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
@@ -11075,85 +10630,9 @@ var SimpleStream = exports.SimpleStream = function () {
 
     return SimpleStream;
 }();
-//# sourceMappingURL=simple_stream.js.map
 
 /***/ }),
-/* 25 */
-/***/ (function(module, exports, __webpack_require__) {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", {
-    value: true
-});
-exports.WS = undefined;
-
-var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
-
-var _debug = __webpack_require__(0);
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-var WS = exports.WS = function () {
-    function WS() {
-        var host = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : "localhost";
-        var port = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : "8080";
-        var options = arguments[2];
-
-        _classCallCheck(this, WS);
-
-        _debug._console.assert(host && host.length, 'host must be a non null string');
-        _debug._console.assert(port && port.length, 'port must be a non null string');
-        this._host = host;
-        this._port = port;
-    }
-
-    _createClass(WS, [{
-        key: "onMessage",
-        value: function onMessage(handler) {
-            this._clientMessageHandler = handler;
-        }
-    }, {
-        key: "_messageHandler",
-        value: function _messageHandler(event) {
-            var data = JSON.parse(event.data);
-            //console.log('--> Raw data', data);
-            this._clientMessageHandler(data);
-        }
-    }, {
-        key: "initListening",
-        value: function initListening() {
-            var _this = this;
-
-            _debug._console.assert(this._ws === undefined, "You have already init the WebSocket listening");
-            var wsServer = "ws://" + this._host + ":" + this._port;
-            this._ws = new WebSocket(wsServer);
-            var declareWsReady = void 0;
-            var promise = new Promise(function (ok, ko) {
-                return declareWsReady = ok;
-            });
-            this._ws.addEventListener('open', function () {
-                declareWsReady();
-            });
-            this._ws.addEventListener('message', function (event) {
-                return _this._messageHandler(event);
-            });
-            return promise;
-        }
-    }, {
-        key: "send",
-        value: function send(calleeSecureHash, callerSecureHash, message) {
-            this._ws.send(JSON.stringify({ calleeSecureHash: calleeSecureHash, callerSecureHash: callerSecureHash, message: message }));
-        }
-    }]);
-
-    return WS;
-}();
-//# sourceMappingURL=ws.js.map
-
-/***/ }),
-/* 26 */
+/* 23 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11166,9 +10645,9 @@ exports.WSS = undefined;
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
-var _debug = __webpack_require__(0);
+var _debug = __webpack_require__(1);
 
-var _ws = __webpack_require__(27);
+var _ws = __webpack_require__(24);
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
 
@@ -11294,10 +10773,9 @@ var WSS = exports.WSS = function () {
 
     return WSS;
 }();
-//# sourceMappingURL=wss.js.map
 
 /***/ }),
-/* 27 */
+/* 24 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11309,35 +10787,35 @@ var WSS = exports.WSS = function () {
 
 
 
-const WebSocket = __webpack_require__(9);
+const WebSocket = __webpack_require__(8);
 
-WebSocket.Server = __webpack_require__(34);
-WebSocket.Receiver = __webpack_require__(15);
-WebSocket.Sender = __webpack_require__(17);
+WebSocket.Server = __webpack_require__(31);
+WebSocket.Receiver = __webpack_require__(14);
+WebSocket.Sender = __webpack_require__(16);
 
 module.exports = WebSocket;
 
 
 /***/ }),
-/* 28 */
+/* 25 */
 /***/ (function(module, exports) {
 
 module.exports = require("https");
 
 /***/ }),
-/* 29 */
+/* 26 */
 /***/ (function(module, exports) {
 
 module.exports = require("buffer");
 
 /***/ }),
-/* 30 */
+/* 27 */
 /***/ (function(module, exports) {
 
 module.exports = require("zlib");
 
 /***/ }),
-/* 31 */
+/* 28 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11411,7 +10889,7 @@ module.exports = Queue;
 
 
 /***/ }),
-/* 32 */
+/* 29 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11569,7 +11047,7 @@ module.exports = EventTarget;
 
 
 /***/ }),
-/* 33 */
+/* 30 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11593,7 +11071,7 @@ try {
 
 
 /***/ }),
-/* 34 */
+/* 31 */
 /***/ (function(module, exports, __webpack_require__) {
 
 "use strict";
@@ -11605,17 +11083,17 @@ try {
 
 
 
-const safeBuffer = __webpack_require__(1);
-const EventEmitter = __webpack_require__(10);
-const crypto = __webpack_require__(4);
-const Ultron = __webpack_require__(11);
-const http = __webpack_require__(12);
-const url = __webpack_require__(13);
+const safeBuffer = __webpack_require__(0);
+const EventEmitter = __webpack_require__(9);
+const crypto = __webpack_require__(3);
+const Ultron = __webpack_require__(10);
+const http = __webpack_require__(11);
+const url = __webpack_require__(12);
 
-const PerMessageDeflate = __webpack_require__(3);
-const Extensions = __webpack_require__(14);
-const constants = __webpack_require__(6);
-const WebSocket = __webpack_require__(9);
+const PerMessageDeflate = __webpack_require__(2);
+const Extensions = __webpack_require__(13);
+const constants = __webpack_require__(5);
+const WebSocket = __webpack_require__(8);
 
 const Buffer = safeBuffer.Buffer;
 
@@ -11935,3 +11413,4 @@ function abortConnection (socket, code, message) {
 
 /***/ })
 /******/ ]);
+//# sourceMappingURL=FAJ_node.js.map
