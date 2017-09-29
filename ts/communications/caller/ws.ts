@@ -4,7 +4,7 @@ import { generateError } from "../../error"
 
 export class WS implements FACallerCommunication {
   private _ws :WebSocket
-  private _clientMessageHandler :(data :string) => void
+  private _clientMessageHandler :(data :string) => string
   private _host :string
   private _port :string
 
@@ -16,7 +16,7 @@ export class WS implements FACallerCommunication {
     this._port = port
   }
 
-  public onMessage(handler :(data :string) => void) {
+  public onMessage(handler :(data :string) => string) {
     this._clientMessageHandler = handler
   }
 

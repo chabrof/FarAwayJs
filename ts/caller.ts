@@ -2,7 +2,7 @@ import {  _console }              from "./_debug"
 import {  debugOn }               from "./_debug"
 import {  generateError }         from "./error"
 import {  CallableObject }        from "./callee"
-import { Chance }                 from "chance"
+import * as Chance                from "chance"
 import {  FACallerCommunication,
           CallerBackCreate,
           CallerBCInitData }      from "./interfaces"
@@ -18,6 +18,7 @@ let _importedInstiables = {}
 let _myCallerGUID :string
 let _myCallerSecureHash :string
 let _backCreates :{[name :string]: CallerBackCreate} = {}
+let _instancesTemp :{[name :string]: any} = {}
 
 function setCommunication(communication :FACallerCommunication) :Promise<any> {
   _com = communication
@@ -113,7 +114,11 @@ _treat.farInstantiateReturn = function(callObj) {
     }
   }
 
-  let instanceRpc = new FarAwayCallerInstance(callObj.rIdx)
+  let instanceRpc = _instancesTemp[callObj.rIdx]
+  console.log(' instance', instanceRpc)
+  _instancesTemp[callObj.rIdx] = undefined
+  instanceRpc.__farAwayInstIdx__ = callObj.instanceIdx
+  instanceRpc.__farInstDoneConfirm__() // confirm that instantiation has been remotely done
   _promiseOkCbksH[callObj.rIdx](instanceRpc) // complete the associated Promise
 }
 
@@ -121,7 +126,7 @@ _treat.farImportReturn = function(callObj) {
   _console.log('treat.farImportReturn', callObj)
   if (typeof callObj.rIdx !== "number") {
     throw {
-      "message" : "rIdx is empty or invalid : " + callObj.rCallrIdx,
+      "message" : "rIdx is empty or invalid : " + callObj.rIdx,
       "send"    : false
     }
   }
@@ -160,7 +165,7 @@ _wrappingObjFactory['function'] = function(objDescription) {
 _wrappingObjFactory['instantiable'] = function(objDescription) {
   let factory = {}
 
-  factory[objDescription] = {}
+  let result = {}
   /*
   for (let i in objDescription.structure) {
     if (i !== "__prototype__") {
@@ -169,15 +174,36 @@ _wrappingObjFactory['instantiable'] = function(objDescription) {
       }
     }
   }*/
+
+
+  let func = function() {
+    let args :any[] = Array.prototype.slice.call(arguments)
+    if ( this === (function () { return this; })() ) {
+      // Called as a function
+      return farCall(objDescription.name, args)
+    }
+    else {
+      // Called as a constructor
+      this.__farInstPromise__ = new Promise((ok, ko) => { this.__farInstDoneConfirm__ = ok })
+      farInstantiate(objDescription.name, this, args)
+      return null
+    }
+  }
+
+  ; (func as any).__farAwayInstIdx__ = undefined
+
   let remotePrototype = objDescription.structure.__prototype__
   for (let i in remotePrototype) {
-    factory[i] =
-      function(instanceIdx :number = undefined) {
-        return farCall(objDescription.name + '.' + remotePrototype[i], [], instanceIdx)
+    func.prototype[i] =
+      function() {
+        let args :any[] = Array.prototype.slice.call(arguments)
+        return this.__farInstPromise__.then(() => farCall(objDescription.name + '.' + i, args, this.__farAwayInstIdx__))
       }
   }
+  _importedInstiables[objDescription.name] = func
+  return func
 }
-
+/*
 class FarAwayCallerInstance {
   __farAwayInstIdx__ :number
 
@@ -185,11 +211,11 @@ class FarAwayCallerInstance {
     this.__farAwayInstIdx__ = instanceIdx
   }
 
-  farCall(objectName :string, args :any[]) {
-    return farCall(objectName, args, this.__farAwayInstIdx__)
+  farCall(name :string, args :any[]) {
+    return farCall(name, args, this.__farAwayInstIdx__)
   }
 }
-
+*/
 function _getRCallIdx() {
   return _rCallIdx++
 }
@@ -202,14 +228,14 @@ function _extractArgs(argsIn :any) {
     return argsOut;
 }
 
-function farCall(objectName :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
-  _console.log('farCall : ', objectName, args)
+function farCall(name :string, args :any[] = [], instanceIdx :number = undefined) :Promise<any> {
+  _console.log('farCall : ', name, args)
   _console.assert(_comReadyPromise, 'Init seems not to be done yet, you must call initWsListening before such operation')
   _console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
-  if (typeof objectName !== "string" || ! objectName.length) {
+  if (typeof name !== "string" || ! name.length) {
     throw {
-        "message" : "Method is empty or invalid : " + objectName,
+        "message" : "Method is empty or invalid : " + name,
         "send" : false
       }
   }
@@ -220,7 +246,7 @@ function farCall(objectName :string, args :any[] = [], instanceIdx :number = und
                 _myCallerSecureHash,
                 JSON.stringify({
                     "type"              : "farCall",
-                    "objectName"        : objectName,
+                    "name"              : name,
                     "args"              : args,
                     "instanceIdx"       : instanceIdx,
                     "rIdx"              : idx,
@@ -233,8 +259,8 @@ function farCall(objectName :string, args :any[] = [], instanceIdx :number = und
 function farImport(objNames :string[]) :any {
   _console.log('farImport : ', objNames)
 
-  let idx = _getRCallIdx()
-  let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
+  let rIdx = _getRCallIdx()
+  let promise = new Promise(function(ok, ko) { _promiseOkCbksH[rIdx] = ok })
   let chance = new (Chance.Chance as any)()
   _myCallerGUID = chance.guid()
   _comReadyPromise.then(
@@ -243,7 +269,7 @@ function farImport(objNames :string[]) :any {
                   _myCallerGUID,
                   JSON.stringify({
                       "type"        : "farImport",
-                      "rIdx"        : idx,
+                      "rIdx"        : rIdx,
                       "callerGUID"  : _myCallerGUID,
                       "symbols"     : objNames
                     }))
@@ -251,32 +277,33 @@ function farImport(objNames :string[]) :any {
   return promise
 }
 
-function farInstantiate (constructorName :string, args :any[] = []) :Promise<any> {
-  _console.log('farInstantiate : ', constructorName)
+function farInstantiate (name :string, instance, args :any[] = []) :Promise<any> {
+  _console.log('farInstantiate : ', name)
   _console.assert(_myCallerSecureHash, '_myCallerSecureHash is not defined, you must call farImport and wait for its response (promise) before calling this method')
 
-  let idx = _getRCallIdx()
-  let promise = new Promise(function(ok, ko) { _promiseOkCbksH[idx] = ok })
+  let rIdx = _getRCallIdx()
+  _instancesTemp[rIdx] = instance
+  let promise = new Promise(function(ok, ko) { _promiseOkCbksH[rIdx] = ok })
   _comReadyPromise.then(
     function() {
       _com.send(null,
                 _myCallerSecureHash,
                 JSON.stringify({
-                    "type"             : "farInstantiate",
-                    "constructorName"  : constructorName,
-                    "rIdx"             : idx,
-                    "args"             : args,
-                    "callerSecureHash" : _myCallerSecureHash
+                    "type"              : "farInstantiate",
+                    "name"              : name,
+                    "rIdx"              : rIdx,
+                    "args"              : args,
+                    "callerSecureHash"  : _myCallerSecureHash
                   }))
     })
   return promise
 }
 
 export let farAwayCaller = {
-  debugOn :debugOn,
-  setCommunication : setCommunication,
-  farCall :farCall,
-  farInstantiate :farInstantiate,
-  farImport :farImport,
+  debugOn             : debugOn,
+  setCommunication    : setCommunication,
+  farCall             : farCall,
+  farInstantiate      : farInstantiate,
+  farImport           : farImport,
   regBackCreateObject : regBackCreateObject
 }

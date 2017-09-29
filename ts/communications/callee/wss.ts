@@ -27,9 +27,6 @@ export class WSS implements FACalleeCommunication {
     this._port = port
   }
 
-  get host() :string { return this._host }
-  get port() :string { return this._port }
-
   public onMessage(calleeSecureHash :string, handler :(data :string) => string, mainClient :boolean = false) {
     this._calleeMessageHandlers[calleeSecureHash] = handler
     this._callersWSInfo[calleeSecureHash] = {

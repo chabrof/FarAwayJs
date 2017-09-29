@@ -2,7 +2,7 @@ import { _console } from "./_debug"
 import { debugOn } from "./_debug"
 import { FACalleeCommunication, TupleInstanceSecureHash } from "./interfaces"
 import { generateError } from "./error"
-import {Chance} from "chance"
+import * as Chance from "chance"
 import { generateSecureHash } from "./secure_hash"
 
 let _callables = {}
@@ -12,6 +12,7 @@ let _instancesH = {}
 let _magicToken = new (Chance.Chance as any)().guid()
 let _callerSecureHashes = {}
 let _myCalleeSecureHash = generateSecureHash(_magicToken, new (Chance.Chance as any)().guid())
+let _instanceIdx = -1
 
 let setCommunication = function(communication :FACalleeCommunication) :Promise<any> {
   _com = communication
@@ -34,8 +35,8 @@ let _messageCbk = function(data :string) {
     secureHash = _treat[messageObj.type](messageObj)
   }
   catch (e) {
-    if (e.send && e.secureHash) {
-      generateError(_myCalleeSecureHash, _com, 1, e.message, e.secureHash)
+    if (e.send && e.callerSecureHash) {
+      generateError(_myCalleeSecureHash, _com, 1, e.message, e.callerSecureHash)
     }
     else {
       _console.error(`Error (not sent) on treat of type(${messageObj.type}) : `, e)
@@ -45,9 +46,9 @@ let _messageCbk = function(data :string) {
   return secureHash
 }
 
-function regInstantiable(object :any, excludeCalls :string[], objectName :string = undefined) {
+function register(object :any, name :string = undefined, excludeCalls :string[] = undefined) {
   _console.assert(typeof object === 'function' && object, `Entity must be a not null function (${object} given)`)
-  let name = objectName ? objectName : object.name
+  name = name ? name : object.name
   _console.assert(typeof name === "string")
   _callables[name] = new CallableObject(name, object, "instantiable", excludeCalls)
 }
@@ -56,8 +57,8 @@ export class CallableObject {
 
   public name :string
   public structure :any = {}
-  public object   :any
-  public type     :string
+  public object :any
+  public type :string
   private _excludeCalls :string[]
 
   constructor(name :string, object :any, type :string, excludeCalls :string[] = []) {
@@ -69,7 +70,6 @@ export class CallableObject {
   }
 
   _exploreObject(object :any) {
-    if (this.type === "function") return null // --> return
     let objectStruct = { __prototype__ : {} }
 
     for (let i in object) {
@@ -85,12 +85,6 @@ export class CallableObject {
     }
     return objectStruct
   }
-}
-
-function regFunction (func :any, funcName) {
-  console.assert(typeof func === 'function', 'func must be a not null function (' + func + ' given)')
-  let name = funcName ? funcName : funcName.name
-  _callables[name] = new CallableObject(name, func, "function")
 }
 
 let _checkSecureHash = function(callerSecureHash :string, instanceIdx? :number) : boolean {
@@ -118,18 +112,21 @@ _treat.farInstantiate = function(constructorObj) {
   try {
     constructorObj.args.unshift(null);
     let instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args))
-    _instancesH[constructorObj.rIdx] = { "instance" : instance, "secureHash" : constructorObj.callerSecureHash }
+
+    _instancesH[++_instanceIdx] = { "instance" : instance, "calleSecureHash" : constructorObj.callerSecureHash }
   }
   catch (e) {
     _console.error(e)
-    throw `${constructorObj.constructorName} seems not to be a valid constructor`
+    throw `${constructorObj.name} seems not to be a valid constructor`
   }
-
+  _console.log("\n_sendFarInstantiateReturn", _instanceIdx)
   _com.send(_myCalleeSecureHash,
             constructorObj.callerSecureHash,
             JSON.stringify({
-                "type" 		: "farInstantiateReturn",
-                "rIdx" 		: constructorObj.rIdx
+                "type"        : "farInstantiateReturn",
+                "name"        : constructorObj.name,
+                "rIdx" 		    : constructorObj.rIdx,
+                "instanceIdx" : _instanceIdx
               } ))
   return constructorObj.callerSecureHash
 }
@@ -140,11 +137,11 @@ _treat.farCall = function(callObj) {
 
   if (! _checkSecureHash(callObj.callerSecureHash, callObj.instanceIdx)) return // -->
 
-  if (typeof callObj.objectName !== "string" || ! callObj.objectName.length) {
+  if (typeof callObj.name !== "string" || ! callObj.name.length) {
     throw {
-        "message"     : `objectName is empty or invalid : ${callObj.objectName}`,
+        "message"     : `name is empty or invalid : ${callObj.name}`,
         "send"        : true,
-        "secureHash"  : callObj.callerSecureHash
+        "callerSecureHash"  : callObj.callerSecureHash
       }
   }
   let obj = _extractObjectReferenceWName(callObj)
@@ -187,9 +184,9 @@ _treat.farImport = function(callObj) {
     (symbol :string) => {
       if (! _callables[symbol]) {
         throw {
-            "message"         : `Symbol '${symbol}' does not exist in callee`,
-            "send"            : true,
-            "callerSecureHash" : callObj.callerGUID
+            "message"           : `Symbol '${symbol}' does not exist in callee`,
+            "send"              : true,
+            "callerSecureHash"  : callObj.callerGUID
           }
       }
       result.push(_callables[symbol])
@@ -201,20 +198,18 @@ _treat.farImport = function(callObj) {
   _console.log(`    : ${callerSecureHash}`);
   _callerSecureHashes[callerSecureHash] = true
 
+  // At this point, caller must now provide its secureHash
   _com.registerCallerSecureHash(_myCalleeSecureHash, callObj.callerGUID, callerSecureHash)
-  // At this point, caller must provide its secureHash
-  _console.log(`--> Send back :`)
-  _console.log(result)
-  setTimeout(() => {
-      _com.send(_myCalleeSecureHash,
-                callerSecureHash,
-                JSON.stringify({
-                    "type" 		          : "farImportReturn",
-                    "rIdx"              : callObj.rIdx,
-                    "callerSecureHash"  : callerSecureHash,
-                    "objects"           : result
-                  }))
-    }, 0)
+
+  _console.log("\n_sendFarImportReturn", result)
+  _com.send(_myCalleeSecureHash,
+            callerSecureHash,
+            JSON.stringify({
+                "type" 		          : "farImportReturn",
+                "rIdx"              : callObj.rIdx,
+                "callerSecureHash"  : callerSecureHash,
+                "objects"           : result
+              }))
 }
 
 function _sendFarCallReturn(callObj, ret) {
@@ -241,23 +236,23 @@ function _sendBackCreateReturn(callObj, ret) {
 
 function _extractConstructorReferenceWName(callObj) {
   _console.log("\n_extractConstructorReferenceWName", callObj)
-  let obj = _callables[callObj.constructorName].object
+  let obj = _callables[callObj.name].object
 
-  let objNameTab = callObj.constructorName.split('.')
+  let objNameTab = callObj.name.split('.')
 
   for (let ct = 1; ct < objNameTab.length; ct++) {
     obj = obj[objNameTab[ct]]
     if (! obj) {
       throw {
-        "message"     : `Object ${callObj.constructorName} does not exist in callee ('${callObj.constructorName}' called)`,
-        "send"        : true,
-        "secureHash"  : callObj.callerSecureHash
+        "message"           : `Object ${callObj.name} does not exist in callee ('${callObj.name}' called)`,
+        "send"              : true,
+        "callerSecureHash"  : callObj.callerSecureHash
       }
     }
   }
   if (! obj) {
     throw {
-      "message"           : `Object ${callObj.constructorName} does not exist in callee ('${callObj.constructorName}' called)`,
+      "message"           : `Object ${callObj.name} does not exist in callee ('${callObj.name}' called)`,
       "send"              : true,
       "callerSecureHash"  : callObj.callerSecureHash
     }
@@ -269,10 +264,18 @@ function _extractObjectReferenceWName(callObj) {
   _console.log("\n_extractObjectReferenceWName", callObj)
   let obj
   let context
-  let objNameTab = callObj.objectName.split('.')
+  let objNameTab = callObj.name.split('.')
   if (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) {
-    context = _instancesH[callObj.instanceIdx].instance
-    obj = context[objNameTab[0]]
+    let localInstanceObj = _instancesH[callObj.instanceIdx]
+    if (localInstanceObj.calleSecureHash !== callObj.callerSecureHash) {
+      throw {
+        "message"           : `Security error : you try to access a unavailable instance for your session`,
+        "send"              : true,
+        "callerSecureHash"  : callObj.callerSecureHash
+      }
+    }
+    context = localInstanceObj.instance
+    obj = context[objNameTab[1]]
   }
   else {
     obj = _callables[objNameTab[0]].object
@@ -280,7 +283,7 @@ function _extractObjectReferenceWName(callObj) {
       obj = obj[objNameTab[ct]].object
       if (! obj) {
         throw {
-          "message"           : `Object ${callObj.objectName} does not exist in callee ('${callObj.objectName}' called)`,
+          "message"           : `(1) Object ${callObj.name} does not exist in callee ('${callObj.name}' called)`,
           "send"              : true,
           "callerSecureHash"  : callObj.callerSecureHash
         }
@@ -290,7 +293,11 @@ function _extractObjectReferenceWName(callObj) {
   }
   if (! obj || typeof obj !== 'function') {
     throw {
-      "message"           : `Object ${callObj.objectName} does not exist ` + (callObj.instanceId ? "(in instance) " : "") + `in callee ('${callObj.objectName}' called)`,
+      "message"           : `(2) Object ${callObj.name} of type '${typeof obj}' does not exist ` +
+                            ((callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) ?
+                              "(in instance) " :
+                              "") +
+                            `in callee ('${callObj.name}' called)`,
       "send"              : true,
       "callerSecureHash"  : callObj.callerSecureHash
     }
@@ -301,6 +308,5 @@ function _extractObjectReferenceWName(callObj) {
 export let farAwayCallee = {
   debugOn           : debugOn,
   setCommunication  : setCommunication,
-  regInstantiable   : regInstantiable,
-  regFunction       : regFunction
+  register          : register
 }
