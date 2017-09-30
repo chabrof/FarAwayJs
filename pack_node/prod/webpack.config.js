@@ -1,9 +1,9 @@
 const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
 
 module.exports = {
-  entry: '../../js/far_away_js_node.js',
+  entry: '../../js/far_away_node.js',
   output: {
-    filename: '../../dist/FAJ_node_min.js',
+    filename: '../../dist/FA_node_min.js',
     libraryTarget: "commonjs2"
   },
   target: 'node',

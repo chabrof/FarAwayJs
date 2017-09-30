@@ -1,4 +1,4 @@
-import { Chance } from "chance";
+import * as Chance from "chance";
 import { generateSecureHash } from "../../secure_hash";
 import { _console } from "../../_debug";
 export class SimpleStream {
@@ -35,6 +35,10 @@ export class SimpleStream {
     }
     setCommunication(communication) {
         this._com = communication;
+        let info = communication.getInfo();
+        _console.assert(info.host && info.port, "Host and port must be available in communication");
+        this._hostForCaller = info.host;
+        this._portForCaller = info.port;
         this._com.onMessage(this._mySecureHash, (data) => this._messageCbk(data));
     }
     _messageCbk(data) {
@@ -63,7 +67,7 @@ export class SimpleStream {
     getBCInitDataForCaller() {
         return {
             constructorName: "SimpleStream",
-            constructorArgs: [this._com.host, this._com.port, this._mySecureHash],
+            constructorArgs: [this._hostForCaller, this._portForCaller, this._mySecureHash],
             initArgs: []
         };
     }

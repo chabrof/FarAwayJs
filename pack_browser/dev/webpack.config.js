@@ -1,7 +1,7 @@
 module.exports = {
-  entry: '../../js/far_away_js_browser.js',
+  entry: '../../js/far_away_browser.js',
   output: {
-    filename: '../../dist/FAJ_browser.js',
+    filename: '../../dist/FA_browser.js',
     libraryTarget: "umd"
   },
   devtool: "eval-source-map",

@@ -11,8 +11,7 @@ export interface FACallerCommunication extends FASending    {
 
 export interface FACalleeCommunication extends FASending  {
   initListening :() => Promise<void>
-  host :string
-  port :string
+  getInfo :() => any
   onMessage :(calleeSecureHash :string, handler :(data :string) => void, mainClient? :boolean) => void
   registerCallerSecureHash :(calleeSecureHash :string, callerGUID :string, callerSecureHash :string) => void
 }

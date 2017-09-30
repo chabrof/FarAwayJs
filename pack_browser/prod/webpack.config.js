@@ -1,9 +1,9 @@
 const UglifyJSPlugin = require('uglifyjs-webpack-plugin');
 
 module.exports = {
-  entry: '../../js/far_away_js_browser.js',
+  entry: '../../js/far_away_browser.js',
   output: {
-    filename: '../../dist/FAJ_browser_min.js',
+    filename: '../../dist/FA_browser_min.js',
     libraryTarget: "umd"
   },
   devtool: "source-map",

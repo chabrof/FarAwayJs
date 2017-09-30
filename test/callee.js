@@ -1,8 +1,8 @@
-var { callee, CalleeWS, CalleeSimpleStream } = require("../dist/FAJ_node.js");
+var { callee, CalleeWS, CalleeSimpleStream } = require("../dist/FA_node.js");
 
 console.log("Beginning");
 //
-// Init FarAwayJs (and activate console logs)
+// Init FarAway (and activate console logs)
 //
 callee.debugOn();
 console.log('Debug is now on');

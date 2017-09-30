@@ -4,8 +4,8 @@ import { SimpleStream as CallerSimpleStream } from "./back_create/caller/simple_
 import { WS as CallerWS } from "./communications/caller/ws"
 
 export { caller, CallerSimpleStream, CallerWS }
-let FarAwayJs =  { caller, CallerSimpleStream, CallerWS }
+let FarAway =  { caller, CallerSimpleStream, CallerWS }
 
 // define some global for Vanilla Js using only on browser side
 if (typeof window !== 'undefined')
-  (window as any).FarAwayJs = FarAwayJs
+  (window as any).FarAway = FarAway

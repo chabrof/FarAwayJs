@@ -10,8 +10,9 @@ export class WSS {
         this._host = host;
         this._port = port;
     }
-    get host() { return this._host; }
-    get port() { return this._port; }
+    getInfo() {
+        return { host: this._host, port: this._port };
+    }
     onMessage(calleeSecureHash, handler, mainClient = false) {
         this._calleeMessageHandlers[calleeSecureHash] = handler;
         this._callersWSInfo[calleeSecureHash] = {

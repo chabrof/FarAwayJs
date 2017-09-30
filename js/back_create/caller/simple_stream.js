@@ -1,5 +1,5 @@
 import { _console } from "../../_debug";
-import { Chance } from "chance";
+import * as Chance from "chance";
 export class SimpleStream {
     constructor(host = "localhost", port = "8080", calleeSecureHash) {
         this._treat = {};
@@ -25,6 +25,7 @@ export class SimpleStream {
         _console.assert(host && host.length, 'host must be a non null string');
         _console.assert(port && port.length, 'port must be a non null string');
         _console.assert(calleeSecureHash && calleeSecureHash.length, 'calleeSecureHash must be a non null string');
+        _console.log('host' + host, "port" + port);
         this._host = host;
         this._port = port;
         this._listeners = [];

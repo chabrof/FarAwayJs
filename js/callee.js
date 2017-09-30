@@ -76,8 +76,10 @@ let _checkSecureHash = function (callerSecureHash, instanceIdx) {
         generateError(_myCalleeSecureHash, _com, 4, `The caller (${callerSecureHash}) seems not to be registered, it must call farImport before further operation and then pass secureHash on each request`, callerSecureHash);
         return false;
     }
-    if (instanceIdx !== undefined && _instancesH[instanceIdx].secureHash !== callerSecureHash) {
-        generateError(_myCalleeSecureHash, _com, 4, 'The caller is not allowed to access this ressource', callerSecureHash);
+    console.log('instance');
+    console.log(_instancesH[instanceIdx]);
+    if (instanceIdx !== undefined && _instancesH[instanceIdx].callerSecureHash !== callerSecureHash) {
+        generateError(_myCalleeSecureHash, _com, 4, 'The caller is not allowed to access this ressource', callerSecureHash, { callerSecureHash, instanceSecureHash: _instancesH[instanceIdx].callerSecureHash });
         return false;
     }
     return true;
@@ -92,7 +94,7 @@ _treat.farInstantiate = function (constructorObj) {
     try {
         constructorObj.args.unshift(null);
         let instance = new (Function.prototype.bind.apply(Constructor, constructorObj.args));
-        _instancesH[++_instanceIdx] = { "instance": instance, "calleSecureHash": constructorObj.callerSecureHash };
+        _instancesH[++_instanceIdx] = { "instance": instance, "callerSecureHash": constructorObj.callerSecureHash };
     }
     catch (e) {
         _console.error(e);
@@ -224,7 +226,7 @@ function _extractObjectReferenceWName(callObj) {
     let objNameTab = callObj.name.split('.');
     if (callObj.instanceIdx !== undefined && callObj.instanceIdx !== null) {
         let localInstanceObj = _instancesH[callObj.instanceIdx];
-        if (localInstanceObj.calleSecureHash !== callObj.callerSecureHash) {
+        if (localInstanceObj.callerSecureHash !== callObj.callerSecureHash) {
             throw {
                 "message": `Security error : you try to access a unavailable instance for your session`,
                 "send": true,

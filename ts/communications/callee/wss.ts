@@ -3,7 +3,6 @@ import { _console } from "../../_debug"
 import { generateError } from "../../error"
 import { Server, OPEN } from "ws"
 
-
 interface CallersWSInfo {
   GUIDToSocket :any
   secureHashToSocket :any
@@ -25,6 +24,10 @@ export class WSS implements FACalleeCommunication {
 
     this._host = host
     this._port = port
+  }
+
+  public getInfo() :any {
+    return { host : this._host, port : this._port }
   }
 
   public onMessage(calleeSecureHash :string, handler :(data :string) => string, mainClient :boolean = false) {

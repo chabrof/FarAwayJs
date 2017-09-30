@@ -1,5 +1,5 @@
 {
-  "name": "FarAwayJs",
+  "name": "faraway",
   "description": "Node and browser very simple communication with a kind of RPC for JS/TS objects using WebSockets",
   "version": "0.0.1",
   "license": "MIT",
@@ -8,9 +8,9 @@
     "email": "developer@stopgapjs.org",
     "url": "http://www.stopgapjs.org"
   },
-  "main": "./js/far_away_js.js",
-  "typings": "./js/far_away_js.d.ts",
-  "homepage": "http://www.stopgapjs.org/#FarAwayJs",
+  "main": "./js/far_away.js",
+  "typings": "./js/far_away.d.ts",
+  "homepage": "http://www.stopgapjs.org/#faraway",
   "dependencies": {
     "@types/node": "latest",
     "@types/ws" : "latest",
@@ -41,5 +41,5 @@
     "build:prod:node": "cd \"pack_node/prod\" && pwd && \"../../node_modules/.bin/webpack\"",
     "build:node:prod" : "npm run build:prod:node"
   },
-  "readme": "#FarAwayJs"
+  "readme": "With FarAway,  you can easily make NodeJs server distant calls :\nyou use simple local functions or objects, which return Promises.\nFarAway gives to browsers a very simple way to communicate with a NodeJs server.\n\nIt's a kind of RPC for JS/TS functions/objects using WebSockets (or, later, HTTP standard calls).\nFarAway is not intended to replace a REST API, it can, but this is not its primary goal (see [What about a REST API ? ](/what-about-a-rest-api.md)for details)."
 }

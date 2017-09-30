@@ -1,10 +1,12 @@
 import { CalleeBackCreate, CallerBCInitData, FACalleeCommunication } from "../../interfaces"
-import { Chance } from "chance"
+import * as Chance from "chance"
 import { generateSecureHash } from "../../secure_hash"
 import { _console } from "../../_debug"
 
 export class SimpleStream implements CalleeBackCreate {
 
+  private _hostForCaller :string
+  private _portForCaller :string
   private _com :FACalleeCommunication
   private _magicToken = new Chance.Chance().guid()
   private _mySecureHash :string = generateSecureHash(this._magicToken, new Chance.Chance().guid())
@@ -47,6 +49,11 @@ export class SimpleStream implements CalleeBackCreate {
 
   public setCommunication(communication :FACalleeCommunication) :void {
     this._com = communication
+    let info = communication.getInfo()
+    _console.assert(info.host && info.port, "Host and port must be available in communication")
+
+    this._hostForCaller = info.host
+    this._portForCaller = info.port
     this._com.onMessage(this._mySecureHash, (data :string) => this._messageCbk(data))
   }
 
@@ -78,7 +85,7 @@ export class SimpleStream implements CalleeBackCreate {
   public getBCInitDataForCaller() :CallerBCInitData {
     return {
       constructorName : "SimpleStream",
-      constructorArgs : [ this._com.host, this._com.port, this._mySecureHash ],
+      constructorArgs : [ this._hostForCaller, this._portForCaller, this._mySecureHash ],
       initArgs : []
     }
   }

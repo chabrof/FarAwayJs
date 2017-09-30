@@ -1,14 +1,14 @@
 <html>
-<script src="../dist/FAJ_browser.js"></script>
+<script src="../dist/FA_browser.js"></script>
 <script>
 
 function main() {
-  var caller = FarAwayJs.caller
-  var SimpleStream = FarAwayJs.CallerSimpleStream
+  var caller = FarAway.caller
+  var SimpleStream = FarAway.CallerSimpleStream
 
   // Activate console logs
   caller.debugOn()
-  let wsCommunication = new FarAwayJs.CallerWS('localhost', '8080')
+  let wsCommunication = new FarAway.CallerWS('localhost', '8080')
   caller.setCommunication(wsCommunication)
   caller.regBackCreateObject("SimpleStream", SimpleStream)
 
@@ -32,7 +32,7 @@ function nextStep(MyClass) {
   // in parallel get another stream
   instance.getAnotherPreciousStream().then((stream) => listenToStream(stream))
 /*
-  FarAwayJs.caller.farInstantiate("MyClass", ['argConstruct1', 'argConstruct2'])
+  FarAway.caller.farInstantiate("MyClass", ['argConstruct1', 'argConstruct2'])
     .then((myClass) => {
         console.log('Try to call methods of a freshly instantiated object');
 
