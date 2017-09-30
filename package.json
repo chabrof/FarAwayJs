@@ -41,5 +41,5 @@
     "build:prod:node": "cd \"pack_node/prod\" && pwd && \"../../node_modules/.bin/webpack\"",
     "build:node:prod" : "npm run build:prod:node"
   },
-  "readme": "With FarAway,  you can easily make NodeJs server distant calls :\nyou use simple local functions or objects, which return Promises.\nFarAway gives to browsers a very simple way to communicate with a NodeJs server.\n\nIt's a kind of RPC for JS/TS functions/objects using WebSockets (or, later, HTTP standard calls).\nFarAway is not intended to replace a REST API, it can, but this is not its primary goal (see [What about a REST API ? ](/what-about-a-rest-api.md)for details)."
+  "readme": "FarAway gives to browsers a very simple way to communicate with a NodeJs server.\n\nWith FarAway,  you can easily make NodeJs server calls.  \nYou use simple local functions directly nested with foreign objects.\nThe foreign aspect (asynchronism) is managed with Promises.\n\nIt's a kind of RPC for JS/TS functions/objects using WebSockets (or, later, HTTP standard calls)."
 }
